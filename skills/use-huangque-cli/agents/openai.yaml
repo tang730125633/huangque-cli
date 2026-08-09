@@ -1,0 +1,4 @@
+interface:
+  display_name: "使用黄雀 CLI"
+  short_description: "让 Agent 发现、确认并安全调用黄雀主站 CLI 能力"
+  default_prompt: "Use $use-huangque-cli to discover and safely run a Huangque CLI capability."
