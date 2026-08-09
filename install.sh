@@ -1,16 +1,21 @@
 #!/bin/sh
 set -eu
 
-version="0.6.1"
-wheel_name="huangque_hq_cli-0.6.1-py3-none-any.whl"
-wheel_sha256="fff9ed4adae6773c7c0bdd071b3f1e95454af1c3eca0ebb2f8d240834d442b61"
+version="0.6.2"
+wheel_name="huangque_hq_cli-0.6.2-py3-none-any.whl"
+wheel_sha256="7dedc5ee726ae2af2155cedce023dbe19787e6c8281ab72a809f086d0754e367"
 wheel_url="https://github.com/tang730125633/huangque-cli/releases/download/v$version/$wheel_name"
 
 fail() { printf 'HQ CLI 安装失败：%s\n' "$1" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || fail "需要 curl"
-command -v python3 >/dev/null 2>&1 || fail "需要 Python 3.10 或更高版本"
-python_bin="$(command -v python3)"
-"$python_bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || fail "需要 Python 3.10 或更高版本"
+python_bin=""
+for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+    python_bin="$(command -v "$candidate")"
+    break
+  fi
+done
+[ -n "$python_bin" ] || fail "需要 Python 3.10 或更高版本"
 [ -n "${HOME:-}" ] || fail "HOME 未设置"
 
 data_root="${XDG_DATA_HOME:-$HOME/.local/share}/hq-cli"
