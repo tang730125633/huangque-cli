@@ -12,7 +12,7 @@ description: Discover and safely run Huangque main-site capabilities through the
 3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.6.2/install.sh | sh
 ```
 
 4. Run `doctor --json` before account-bound work.

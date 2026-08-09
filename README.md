@@ -26,7 +26,7 @@ $ hq capabilities --json
 需要 Python 3.10+：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.6.2/install.sh | sh
 ```
 
 安装脚本会校验版本化 wheel 的 SHA-256，将程序放到 `~/.local/share/hq-cli/`，并创建 `~/.local/bin/hq`。
