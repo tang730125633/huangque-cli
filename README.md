@@ -26,7 +26,7 @@ $ hq capabilities --json
 需要 Python 3.10+：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.6.2/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.7.0/install.sh | sh
 ```
 
 安装脚本会校验版本化 wheel 的 SHA-256，将程序放到 `~/.local/share/hq-cli/`，并创建 `~/.local/bin/hq`。
@@ -43,6 +43,21 @@ hq describe ip12-projects --json
 ```
 
 `hq login` 使用浏览器设备授权。CLI 不接触账号密码或网页 Cookie；访问令牌只保存在本机 `~/.config/hq-cli/credentials.json`，权限为 `0600`，并可通过 `hq logout` 撤销。
+
+## 页面入口不等于直接执行
+
+`text-video`、`short-drama`、`pricing-page`、`invite`、`recharge` 和 `bots` 是页面入口：运行后只返回固定黄雀主站链接，除非再加 `--open-browser`，否则连浏览器都不会打开，更不会生成内容、创建订单或付款。设备授权页只由 `hq login` 的登录流程使用，不作为普通页面入口。
+
+这批新增的直接 API 以安全读取为主：
+
+- `digital-ip-projects`、`digital-ip-project`、`digital-ip-report`
+- `text-video-capability`、`text-video-templates`、`text-video-styles`、`text-video-voices`
+- `pricing`
+- `inspiration-catalog`、`inspiration-likes`
+- `leads-crm`、`video-avatars`、`audio-slots`
+- `short-drama-projects`、`short-drama-project`、`short-drama-conversation`、`short-drama-preflight`
+
+`inspiration-like` 和 `leads-crm-upsert` 会修改当前账号的数据，因此必须显式使用 `--confirm`；它们不会调用 AI 或扣点。
 
 ## 给 Agent 的安全工作流
 
@@ -64,9 +79,10 @@ hq run image-generate --input @image.json --confirm --quote-token '<quote_token>
 
 - 账号、点数、权限和渠道目录读取。
 - Hermes IP12 项目、进度、报告与显式确认对话。
-- 图片、视频、音频生成与提示词优化。
+- 图片、视频、音频生成与提示词优化；`image-generate` 包含最多 14 张参考图的 Banana nb2/pro，`video-generate` 包含 Sora 2/Pro。
 - 私有图片上传、画布创建、画布 Agent 方案与受限写入。
 - 任务、流水、资产、音色、收藏与标签。
+- 灵感案例与收藏、获客跟进、数字人形象、声音克隆槽位，以及短剧项目的安全读取。
 - 一键成片项目的创建、分析、审核与渲染。
 - 数字人口播项目的能力检查、创建、读取与基础设置。
 - 黄雀主站工作台的安全深链接。
@@ -83,7 +99,7 @@ hq describe <能力名> --json
 - 只允许内置能力和固定黄雀主站路径，拒绝任意 URL 与跨域重定向。
 - 外部 AI 和写操作需要显式确认；付费生成必须先报价再确认。
 - 幂等写入保留 `request_id`，并发更新保留 `revision` / `base_version`。
-- 不提供管理员、充值、批量删除、任意文件读取或任意 HTTP 请求能力。
+- 不提供管理员、自动充值或付款、批量删除、任意文件读取或任意 HTTP 请求能力。
 - 上传只接受本人指定的 PNG/JPG/WebP，拒绝符号链接，不回显本地路径和原始文件名。
 
 ## 本地开发
