@@ -12,7 +12,7 @@ description: Discover and safely run Huangque main-site capabilities through the
 3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.6.2/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.7.0/install.sh | sh
 ```
 
 4. Run `doctor --json` before account-bound work.
@@ -31,6 +31,10 @@ hq describe <capability> --json
 
 Treat these outputs as the current capability and input contract. Do not guess undocumented actions, fields, URLs, methods, or costs.
 
+Page entries are not direct execution. `text-video`, `short-drama`, `pricing-page`, `invite`, `recharge`, and `bots` only return a fixed Huangque URL; `--open-browser` only opens that page. Do not report a generation, order, payment, or Bot change from a navigation result. The device page belongs to `hq login` and is not a normal navigation capability.
+
+The direct read-only capabilities also include inspiration catalog/likes, leads CRM, video avatars, audio slots, and short-drama projects/project/conversation/preflight. `inspiration-like` and `leads-crm-upsert` are ordinary writes and always require `--confirm`.
+
 ## Classify the side effect
 
 - Navigation and reads: run after showing the requested target.
@@ -46,6 +50,8 @@ Never turn a read request into a write, paid task, upload, public message, or de
 Pass a UTF-8 JSON object through stdin or `--input @file`. Keep input within the schema returned by `hq describe`.
 
 For image upload, pass one explicit absolute PNG/JPG/WebP path with `--file`; do not scan directories or follow symbolic links.
+
+For `image-generate`, Banana uses `provider=banana`, `model=nb2|pro`, its listed ratios, and at most 14 references. For `video-generate`, Sora uses `channel=sora`, `model=sora-2|sora-2-pro`, `seconds=4|8|12`, and at most one reference; do not send `duration` or `generate_audio`. Follow the returned `constraints` for every provider or channel.
 
 ## Verify the result
 
