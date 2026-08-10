@@ -12,7 +12,7 @@ description: Discover and safely run Huangque main-site capabilities through the
 3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.7.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.8.0/install.sh | sh
 ```
 
 4. Run `doctor --json` before account-bound work.
@@ -49,9 +49,13 @@ Never turn a read request into a write, paid task, upload, public message, or de
 
 Pass a UTF-8 JSON object through stdin or `--input @file`. Keep input within the schema returned by `hq describe`.
 
-For image upload, pass one explicit absolute PNG/JPG/WebP path with `--file`; do not scan directories or follow symbolic links.
+For image upload, pass one explicit absolute PNG/JPG/WebP path with `--file`. For `video-upload`, pass one explicit absolute MP4/MOV/WebM path no larger than 32 MiB. Both uploads require `--confirm`; never scan directories, follow symbolic links, or expose the local path or filename as generation input.
 
 For `image-generate`, Banana uses `provider=banana`, `model=nb2|pro`, its listed ratios, and at most 14 references. For `video-generate`, Sora uses `channel=sora`, `model=sora-2|sora-2-pro`, `seconds=4|8|12`, and at most one reference; do not send `duration` or `generate_audio`. Follow the returned `constraints` for every provider or channel.
+
+For `digital-ip-text-generate`, use one ready `avatar_id` owned by the current account plus `text` and `voice`. For `digital-ip-audio-generate`, use one owned `avatar_id` and copy the at-most-500-character `audio_file` from the current account's asset result; never substitute a URL, local path, upload, or base64 audio. For `digital-ip-batch-generate`, pass 2–5 `avatars` objects containing distinct owned `avatar_id` values; all items share one `text` and `voice`.
+
+For `cinematic-open-generate`, provide either one compatible `avatar_id` or 1–3 distinct `avatar_ids`, plus `prompt`. Avatar looks and private `reference_image_upload_ids` share 9 image slots: 1/2/3 avatars leave room for 8/7/6 reference images; optionally add at most 3 private `reference_video_upload_ids`. `cinematic-motion-generate` requires one owned `avatar_id` and exactly one `reference_video_upload_ids` item. `tryon-fast-generate` requires private person and clothes image upload IDs. `tryon-classic-generate` requires one private person video upload ID plus a clothes image upload ID, a background image upload ID, or both.
 
 ## Verify the result
 
