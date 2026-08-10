@@ -12,7 +12,7 @@ description: Discover and safely run Huangque main-site capabilities through the
 3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.8.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.9.0/install.sh | sh
 ```
 
 4. Run `doctor --json` before account-bound work.
@@ -57,9 +57,12 @@ For `digital-ip-text-generate`, use one ready `avatar_id` owned by the current a
 
 For `cinematic-open-generate`, provide either one compatible `avatar_id` or 1–3 distinct `avatar_ids`, plus `prompt`. Avatar looks and private `reference_image_upload_ids` share 9 image slots: 1/2/3 avatars leave room for 8/7/6 reference images; optionally add at most 3 private `reference_video_upload_ids`. `cinematic-motion-generate` requires one owned `avatar_id` and exactly one `reference_video_upload_ids` item. `tryon-fast-generate` requires private person and clothes image upload IDs. `tryon-classic-generate` requires one private person video upload ID plus a clothes image upload ID, a background image upload ID, or both.
 
+For `collect-content`, `collect-video`, and `collect-transcript`, pass exactly one public Douyin or Xiaohongshu HTTP(S) content URL with no explicit port or port 80/443. Reject share commands, prose containing a URL, credentials, local paths, other ports, and other hosts. `collect-search` accepts only `platform=douyin|xhs`, a keyword, and an optional page (default 1). `leads-generate` accepts 1–3 unique platforms from `douyin|xhs|channels`; `count=1..30` and `pages=1..3` are optional. Require `keyword` whenever Douyin or Xiaohongshu is selected, and require `channels_targets` whenever Channels is selected. Mixed platform requests require both.
+
 ## Verify the result
 
 - Check the process exit code and JSON `schema`.
 - For asynchronous work, read the returned task with the supported task capability until terminal.
+- All five collect / leads paid actions are asynchronous. After confirmation, preserve the returned `job_id` and poll only `task`. Read full comments and transcript text from `task.result`; `assets` with `kind=collect` stores only a summary plus the saved video link. Leads also appear as full `assets` records with `kind=leads`, while `collect-search` keeps its items only in `task.result`. Never resubmit merely because the task is still running.
 - A provider `completed` state alone is insufficient for media delivery; confirm the result URL exists and the requested artifact is usable.
 - Report the capability, side effect, confirmation used, task or resource ID, final status, and any remaining user action. Never print credentials.
