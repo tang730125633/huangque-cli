@@ -7,12 +7,18 @@ description: Discover and safely run Huangque main-site capabilities through the
 
 ## Establish the client
 
-1. From this repository, prefer `.venv/bin/hq` when it exists; otherwise locate `hq` with `command -v hq`.
+1. From this repository, prefer `.venv/bin/hq` on macOS/Linux or `.venv\Scripts\hq.exe` on Windows when it exists; otherwise locate `hq` from PATH.
 2. Check the selected executable with `version --json`, then use that same path for every command in the task.
 3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.9.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.0/install.sh | sh
+```
+
+On Windows 10/11 with PowerShell 5.1 or 7, use the reviewed `install.ps1` instead:
+
+```powershell
+irm https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.0/install.ps1 | iex
 ```
 
 4. Run `doctor --json` before account-bound work.
