@@ -42,7 +42,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.10.0", self.payload(output)["cli_version"])
+        self.assertEqual("0.10.1", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -147,6 +147,15 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(re.match(collect_url["pattern"], "https://xiaohongshu.com:443/explore/123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://douyin.com:8080/video"))
         self.assertTrue(re.match(collect_url["pattern"], "https://www.xiaohongshu.com/explore/123"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://mp.weixin.qq.com/s/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "http://weixin.qq.com/sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/not-sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://evil.weixin.qq.com/sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:80/sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:444/sph/Abc123"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://%75:%70@weixin.qq.com/sph/Abc123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://example.com/video"))
         search = by_id["collect-search"]["input_schema"]
         self.assertEqual(["douyin", "xhs"], search["properties"]["platform"]["enum"])
@@ -367,7 +376,7 @@ class HqCliTests(unittest.TestCase):
             },
             "collect-content": {"url": "https://v.douyin.com/abc123/"},
             "collect-video": {"url": "https://www.xiaohongshu.com/explore/123"},
-            "collect-transcript": {"url": "https://xhslink.com/a1b2c3"},
+            "collect-transcript": {"url": "https://weixin.qq.com/sph/Abc123"},
             "collect-search": {"platform": "douyin", "keyword": "AI 创业"},
             "leads-generate": {
                 "keyword": "AI 获客", "platforms": ["douyin", "xhs"],
