@@ -42,7 +42,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.10.1", self.payload(output)["cli_version"])
+        self.assertEqual("0.10.2", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -149,6 +149,9 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(re.match(collect_url["pattern"], "https://www.xiaohongshu.com/explore/123"))
         self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/Abc123"))
         self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com:443/sph/Abc123"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://www.bilibili.com/video/BV1EbdbBHEPa"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://b23.tv/keSUqLz"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://b23.tv.evil.example/keSUqLz"))
         self.assertFalse(re.match(collect_url["pattern"], "https://mp.weixin.qq.com/s/Abc123"))
         self.assertFalse(re.match(collect_url["pattern"], "http://weixin.qq.com/sph/Abc123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/"))
