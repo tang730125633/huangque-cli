@@ -46,6 +46,14 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
+    def test_agent_skill_tracks_cli_release(self):
+        skill = (Path(__file__).resolve().parents[1] / "skills/use-huangque-cli/SKILL.md").read_text(encoding="utf-8")
+        installer_versions = re.findall(r"huangque-cli/v([^/]+)/install\.(?:sh|ps1)", skill)
+        self.assertEqual(2, len(installer_versions))
+        self.assertEqual({cli.__version__}, set(installer_versions))
+        self.assertIn("Bilibili", skill)
+        self.assertIn("b23.tv", skill)
+
     def test_powershell_utf8_bom_input_is_accepted(self):
         self.authorize()
         with patch("hq_cli.client.request_json", return_value=(200, {"items": []})):
