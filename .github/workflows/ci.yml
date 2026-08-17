@@ -56,7 +56,7 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash.ToLowerInvariant()
           $installer = Join-Path $env:RUNNER_TEMP "install.ps1"
           $source = [IO.File]::ReadAllText((Resolve-Path .\install.ps1))
-          $source = $source.Replace("b4480eb521370eeb79e83a66c60ad2078a04c20e09e8b864e6103bbf4a61e33f", $hash)
+          $source = [regex]::Replace($source, '(?m)^\$WheelSha256 = "[0-9a-f]{64}"\r?$', '$WheelSha256 = "' + $hash + '"')
           [IO.File]::WriteAllText($installer, $source, [Text.ASCIIEncoding]::new())
           $unicode = ([string][char]0x9EC4) + ([string][char]0x96C0)
           $root = Join-Path $env:RUNNER_TEMP ($unicode + " CLI Test")
