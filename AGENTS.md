@@ -2,7 +2,8 @@
 
 ## Scope
 
-- This repository owns the public `hq` client, installer, tests, and `use-huangque-cli` Skill.
+- This repository owns the public `hq` client, installer, MCP adapter, and tests.
+- The canonical `use-huangque-cli` Skill lives in `tang730125633/huangque-agent-skill`; this CLI may install verified, versioned releases but must not keep a second copy.
 - Huangque server routes, permissions, billing, and task implementations remain in the private main-site repository.
 
 ## Required checks
@@ -28,3 +29,4 @@ git diff --check
 
 - Bump both `setup.cfg` and `src/hq_cli/__init__.py`.
 - Build one wheel, write its SHA-256 into `install.sh`, rerun tests, and publish matching tag and release assets.
+- Recheck the independent Agent Skill compatibility manifest whenever commands, capability schemas, confirmation rules, or MCP mappings change.
