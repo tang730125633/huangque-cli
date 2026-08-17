@@ -28,7 +28,7 @@ $ hq capabilities --json
 Windows 10/11（PowerShell 5.1 或 7）：
 
 ```powershell
-irm https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.2/install.ps1 | iex
+irm https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.11.0/install.ps1 | iex
 ```
 
 安装后重新打开 PowerShell，运行 `hq version --json`。程序安装到 `%LOCALAPPDATA%\Huangque\hq-cli`，安装器会幂等更新当前用户 PATH。卸载时下载同版本 `uninstall.ps1` 后运行；默认保留登录凭据，加 `-PurgeCredentials` 才会删除。
@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.2/install
 macOS / Linux：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.2/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.11.0/install.sh | sh
 ```
 
 安装脚本会校验版本化 wheel 的 SHA-256，将程序放到 `~/.local/share/hq-cli/`，并创建 `~/.local/bin/hq`。
@@ -83,7 +83,31 @@ hq run image-generate --input @image.json --json
 hq run image-generate --input @image.json --confirm --quote-token '<quote_token>' --json
 ```
 
-项目同时提供可安装的 Codex Skill：[use-huangque-cli](skills/use-huangque-cli/SKILL.md)。
+## Agent Skill 与 MCP
+
+Agent 使用方法由独立公开仓库 [`huangque-agent-skill`](https://github.com/tang730125633/huangque-agent-skill) 维护。CLI 0.11.0 起可以把同一份核心 Skill 安装到 DeepSeek Harness、Codex、OpenClaw 或 Pi Agent：
+
+```sh
+hq skill install deepseek
+hq skill install codex
+hq skill install openclaw
+hq skill install pi
+```
+
+标准 MCP 服务由当前 CLI 直接提供：
+
+```json
+{
+  "mcpServers": {
+    "huangque": {
+      "command": "hq",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+`hq skill install mcp` 会返回同一配置。MCP 为每项业务能力生成独立、带参数约束的工具；不会提供任意命令执行入口。查询可以直接运行，写入与上传仍需确认，付费操作仍需先报价再用同一输入确认。
 
 ## 客户大白话对照
 

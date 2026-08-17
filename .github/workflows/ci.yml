@@ -63,7 +63,7 @@ jobs:
           & $installer -WheelPath $wheel -InstallRoot $root -NoPathUpdate
           $hq = Join-Path $root "bin\hq.cmd"
           $result = & $hq version --json | ConvertFrom-Json
-          if ($result.cli_version -ne "0.10.2") { throw "unexpected CLI version" }
+          if ($result.cli_version -ne "0.11.0") { throw "unexpected CLI version" }
           [IO.File]::AppendAllText($env:GITHUB_ENV, "HQ_TEST_ROOT=$root`n", [Text.UTF8Encoding]::new($false))
       - name: Run through cmd.exe
         shell: cmd
