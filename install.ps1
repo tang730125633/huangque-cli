@@ -12,7 +12,7 @@ $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
 
 $Version = "0.10.3"
 $WheelName = "huangque_hq_cli-$Version-py3-none-any.whl"
-$WheelSha256 = "a035955d783730407616f915e0f4198416457907cf2f1532cf715484108b39aa"
+$WheelSha256 = "b4a5cc541240140480cea792fb52716dce22460c8ec5d8e2762a633dbbbc6e0c"
 $WheelUrl = "https://github.com/tang730125633/huangque-cli/releases/download/v$Version/$WheelName"
 $MarkerText = "Huangque HQ CLI managed installation"
 

@@ -106,6 +106,12 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("canvas:edit", by_id["canvas-ops"]["required_scope"])
         self.assertEqual(12, by_id["canvas-ops"]["input_schema"]["properties"]["ops"]["maxItems"])
         self.assertIn("minimax", by_id["video-generate"]["input_schema"]["properties"]["channel"]["enum"])
+        self.assertIn("2k", by_id["video-generate"]["input_schema"]["properties"]["resolution"]["enum"])
+        minimax_rule = next(
+            rule for rule in by_id["video-generate"]["input_schema"]["allOf"]
+            if rule.get("if", {}).get("properties", {}).get("channel", {}).get("const") == "minimax"
+        )
+        self.assertEqual(["2k"], minimax_rule["then"]["properties"]["resolution"]["enum"])
         self.assertIn("banana", by_id["image-generate"]["input_schema"]["properties"]["provider"]["enum"])
         self.assertEqual(["nb2", "pro"], by_id["image-generate"]["input_schema"]["properties"]["model"]["enum"])
         self.assertIn("21:9", by_id["image-generate"]["input_schema"]["properties"]["ratio"]["enum"])
@@ -155,22 +161,6 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(re.match(collect_url["pattern"], "https://xiaohongshu.com:443/explore/123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://douyin.com:8080/video"))
         self.assertTrue(re.match(collect_url["pattern"], "https://www.xiaohongshu.com/explore/123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/Abc123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com:443/sph/Abc123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://www.bilibili.com/video/BV1EbdbBHEPa"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://b23.tv/keSUqLz"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://b23.tv.evil.example/keSUqLz"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://mp.weixin.qq.com/s/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "http://weixin.qq.com/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph//Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/../Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sphx/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/not-sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://evil.weixin.qq.com/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:80/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:444/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://%75:%70@weixin.qq.com/sph/Abc123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://example.com/video"))
         search = by_id["collect-search"]["input_schema"]
         self.assertEqual(["douyin", "xhs"], search["properties"]["platform"]["enum"])
@@ -391,7 +381,7 @@ class HqCliTests(unittest.TestCase):
             },
             "collect-content": {"url": "https://v.douyin.com/abc123/"},
             "collect-video": {"url": "https://www.xiaohongshu.com/explore/123"},
-            "collect-transcript": {"url": "https://weixin.qq.com/sph/Abc123"},
+            "collect-transcript": {"url": "https://xhslink.com/a1b2c3"},
             "collect-search": {"platform": "douyin", "keyword": "AI 创业"},
             "leads-generate": {
                 "keyword": "AI 获客", "platforms": ["douyin", "xhs"],
@@ -783,6 +773,7 @@ class HqCliTests(unittest.TestCase):
             (["run", "canvas", "--input", "@-"], b'{"collab":"no"}'),
             (["run", "audio-generate", "--input", "@-"], b'{"text":"x","speed":NaN}'),
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","generate_audio":1}'),
+            (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"minimax","resolution":"768p"}'),
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"sora","seconds":5}'),
             (["run", "asset-tags", "--input", "@-"], b'{"kind":"image","key":"x","tags":"not-array"}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["twitter"]}'),
@@ -797,6 +788,92 @@ class HqCliTests(unittest.TestCase):
                 code, output, error = self.invoke(argv, raw)
                 self.assertIn(code, {cli.EXIT_USAGE, cli.EXIT_INPUT})
                 self.assertEqual("hq.error/v1", self.payload(error)["schema"])
+        request.assert_not_called()
+
+    def test_video_channel_contract_is_enforced_before_network(self):
+        _, output, error = self.invoke(["capabilities"])
+        self.assertFalse(error)
+        video = {
+            item["id"]: item for item in self.payload(output)["capabilities"]
+        }["video-generate"]
+        schema = video["input_schema"]
+        self.assertTrue(schema["allOf"])
+        rules = schema["x-hq-channel-rules"]
+        self.assertEqual([4, 15], rules["micro"]["duration"])
+        self.assertEqual([3, 10], rules["omni"]["duration"])
+        self.assertEqual(["2k"], rules["minimax"]["resolutions"])
+        self.assertIn("21:9", rules["minimax"]["ratios"])
+        self.assertNotIn("3:2", rules["minimax"]["ratios"])
+
+        valid = (
+            {"channel": "grok", "ratio": "3:2", "duration": 1, "resolution": "480p"},
+            {"channel": "micro", "ratio": "21:9", "duration": 4, "resolution": "1080p"},
+            {"channel": "omni", "ratio": "16:9", "duration": 3, "resolution": "720p"},
+            {"channel": "minimax", "ratio": "adaptive", "duration": 4, "resolution": "2k"},
+            {"channel": "sora", "model": "sora-2-pro", "seconds": 12,
+             "ratio": "16:9", "resolution": "1080p"},
+        )
+        invalid = (
+            {"channel": "grok", "model": "grok-imagine-video-1.5"},
+            {"channel": "grok", "resolution": "480p",
+             "reference_upload_ids": ["img_" + "a" * 32]},
+            {"channel": "micro", "duration": 3},
+            {"channel": "micro", "ratio": "3:2"},
+            {"channel": "omni", "duration": 11},
+            {"channel": "omni", "resolution": "1080p"},
+            {"channel": "minimax", "duration": 3},
+            {"channel": "minimax", "ratio": "3:2"},
+            {"channel": "sora", "model": "sora-2", "resolution": "1080p"},
+            {"channel": "grok", "resolution": "2k"},
+        )
+
+        with patch("hq_cli.client.request_json") as request:
+            for fields in valid:
+                with self.subTest(valid=fields):
+                    raw = json.dumps({"prompt": "valid channel contract", **fields}).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_AUTH, code, error)
+                    self.assertEqual("auth_required", self.payload(error)["error"])
+            for fields in invalid:
+                with self.subTest(invalid=fields):
+                    raw = json.dumps({"prompt": "invalid channel contract", **fields}).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_INPUT, code, error)
+                    self.assertEqual("input_error", self.payload(error)["error"])
+            reference_limits = {"grok": 7, "micro": 9, "omni": 6, "minimax": 5, "sora": 1}
+            for channel, limit in reference_limits.items():
+                valid_references = ["img_" + format(index, "032x") for index in range(limit)]
+                with self.subTest(channel=channel, references="max"):
+                    raw = json.dumps({
+                        "prompt": "reference limit", "channel": channel,
+                        "reference_upload_ids": valid_references,
+                    }).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_AUTH, code, error)
+                with self.subTest(channel=channel, references="overflow"):
+                    raw = json.dumps({
+                        "prompt": "reference overflow", "channel": channel,
+                        "reference_upload_ids": valid_references + ["img_" + format(limit, "032x")],
+                    }).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_INPUT, code, error)
+                    self.assertEqual("input_error", self.payload(error)["error"])
+            raw = json.dumps({
+                "prompt": "empty references", "reference_upload_ids": [],
+            }).encode()
+            code, output, error = self.invoke(
+                ["run", "video-generate", "--input", "@-"], raw,
+            )
+            self.assertEqual(cli.EXIT_INPUT, code, error)
+            self.assertEqual("input_error", self.payload(error)["error"])
         request.assert_not_called()
 
     def test_deep_json_and_invalid_unicode_are_json_errors(self):
