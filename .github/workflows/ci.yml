@@ -56,14 +56,14 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash.ToLowerInvariant()
           $installer = Join-Path $env:RUNNER_TEMP "install.ps1"
           $source = [IO.File]::ReadAllText((Resolve-Path .\install.ps1))
-          $source = $source.Replace("b4480eb521370eeb79e83a66c60ad2078a04c20e09e8b864e6103bbf4a61e33f", $hash)
+          $source = $source.Replace("b4a5cc541240140480cea792fb52716dce22460c8ec5d8e2762a633dbbbc6e0c", $hash)
           [IO.File]::WriteAllText($installer, $source, [Text.ASCIIEncoding]::new())
           $unicode = ([string][char]0x9EC4) + ([string][char]0x96C0)
           $root = Join-Path $env:RUNNER_TEMP ($unicode + " CLI Test")
           & $installer -WheelPath $wheel -InstallRoot $root -NoPathUpdate
           $hq = Join-Path $root "bin\hq.cmd"
           $result = & $hq version --json | ConvertFrom-Json
-          if ($result.cli_version -ne "0.10.2") { throw "unexpected CLI version" }
+          if ($result.cli_version -ne "0.10.3") { throw "unexpected CLI version" }
           [IO.File]::AppendAllText($env:GITHUB_ENV, "HQ_TEST_ROOT=$root`n", [Text.UTF8Encoding]::new($false))
       - name: Run through cmd.exe
         shell: cmd
