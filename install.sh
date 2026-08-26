@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-version="0.10.3"
-wheel_name="huangque_hq_cli-0.10.3-py3-none-any.whl"
-wheel_sha256="b4a5cc541240140480cea792fb52716dce22460c8ec5d8e2762a633dbbbc6e0c"
+version="0.10.4"
+wheel_name="huangque_hq_cli-0.10.4-py3-none-any.whl"
+wheel_sha256="9c431feaf914b90cde6d50897a59714af8be9a6f4774462614ca01e5a4b59441"
 wheel_url="https://github.com/tang730125633/huangque-cli/releases/download/v$version/$wheel_name"
 
 fail() { printf 'HQ CLI 安装失败：%s\n' "$1" >&2; exit 1; }
