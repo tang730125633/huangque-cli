@@ -42,7 +42,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.10.5", self.payload(output)["cli_version"])
+        self.assertEqual("0.10.6", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -847,6 +847,28 @@ class HqCliTests(unittest.TestCase):
                 self.assertEqual(cli.EXIT_INPUT, code)
                 self.assertEqual("input_error", self.payload(error)["error"])
         request.assert_not_called()
+
+    def test_text_video_valid_talking_material_reaches_the_confirm_gate(self):
+        self.authorize()
+        talking = {
+            "enabled": True,
+            "plan_id": "talking_plan_" + "a" * 32,
+            "source_hash": "b" * 64,
+            "ratio": 0.3,
+            "default_avatar_asset_id": "local_avatar_" + "c" * 32,
+            "scenes": [{"scene_id": "scene_01", "enabled": True}],
+        }
+        raw = json.dumps({
+            "text": "完整文案", "template": "t", "style": "s", "voice": "v",
+            "talking_material": talking,
+        }, ensure_ascii=False).encode()
+        with patch("hq_cli.client.request_json",
+                   return_value=(200, {"kind": "script_to_video", "quote_token": "q.t", "cost": 70})) as request:
+            code, output, error = self.invoke(["run", "text-video-generate", "--input", "@-"], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual("q.t", self.payload(output)["result"]["quote_token"])
+        self.assertEqual(talking, request.call_args.kwargs["body"]["input"]["talking_material"])
+        self.assertFalse(request.call_args.kwargs["body"]["confirm"])
 
     def test_video_channel_contract_is_enforced_before_network(self):
         _, output, error = self.invoke(["capabilities"])
