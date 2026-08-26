@@ -1,32 +1,19 @@
 ---
 name: use-huangque-cli
-description: Discover and safely run Huangque main-site capabilities through the `hq` command. Use when a user asks an Agent to inspect Huangque capabilities, read account-bound data, open a workbench, prepare or submit a supported AI task, manage supported assets or projects, or automate a Huangque workflow while preserving login, confirmation, quote, idempotency, and revision safeguards.
+description: Discover and safely run all Huangque AI capabilities through the `hq` CLI. Use when a user asks an Agent to inspect Huangque capabilities or account data, collect public content such as Bilibili posts or videos, generate media, manage supported assets or projects, open a Huangque workbench, or automate a Huangque workflow while preserving login, confirmation, quote, idempotency, and revision safeguards.
 ---
 
 # Use Huangque CLI
 
-## Establish the client
+## Select one client
 
-1. From this repository, prefer `.venv/bin/hq` on macOS/Linux or `.venv\Scripts\hq.exe` on Windows when it exists; otherwise locate `hq` from PATH.
-2. Check the selected executable with `version --json`, then use that same path for every command in the task.
-3. If the executable is missing or lacks the requested capability, show the reviewed installer and ask before installing or upgrading because it changes the user's machine:
+1. Locate `hq` from `PATH`; on Windows use `Get-Command hq`.
+2. Run `hq version --json` and keep using that exact executable for the task.
+3. If it is missing or incompatible, show the reviewed, version-pinned installer and ask before changing the machine.
+4. Run `hq doctor --json` before account-bound work.
+5. If authorization is absent or expired, run `hq login --json` and let the user finish device approval. Never request a password, Cookie, API key, or token.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.1/install.sh | sh
-```
-
-On Windows 10/11 with PowerShell 5.1 or 7, use the reviewed `install.ps1` instead:
-
-```powershell
-irm https://raw.githubusercontent.com/tang730125633/huangque-cli/v0.10.1/install.ps1 | iex
-```
-
-4. Run `doctor --json` before account-bound work.
-5. Run `login --json` when authorization is absent or expired. Let the user complete browser device approval; never request a password, Cookie, API key, or token.
-
-In the examples below, `hq` means the executable selected above; do not resolve a different PATH binary mid-task.
-
-## Discover before acting
+## Discover the live contract
 
 Run:
 
@@ -35,40 +22,31 @@ hq capabilities --json
 hq describe <capability> --json
 ```
 
-Treat these outputs as the current capability and input contract. Do not guess undocumented actions, fields, URLs, methods, or costs.
+Treat those outputs as authoritative. Do not guess undocumented capability IDs, fields, URLs, providers, limits, methods, or costs. A navigation capability only returns or opens a Huangque page; it does not prove that a generation, order, payment, upload, or Bot change occurred.
 
-Page entries are not direct execution. `text-video`, `short-drama`, `pricing-page`, `invite`, `recharge`, and `bots` only return a fixed Huangque URL; `--open-browser` only opens that page. Do not report a generation, order, payment, or Bot change from a navigation result. The device page belongs to `hq login` and is not a normal navigation capability.
+## Apply the confirmation gate
 
-The direct read-only capabilities also include inspiration catalog/likes, leads CRM, video avatars, audio slots, and short-drama projects/project/conversation/preflight. `inspiration-like` and `leads-crm-upsert` are ordinary writes and always require `--confirm`.
+- Run navigation and reads after identifying the requested target.
+- For external AI, uploads, and ordinary writes, require explicit user approval before passing `--confirm`.
+- Deletion (`asset-delete`) is irreversible and always requires `--confirm`; verify `kind` and `keys` against the `assets` read first, and only delete assets the account produced.
+- For paid actions, first run without `--confirm`, show the returned cost and points, and wait for explicit approval. Then repeat the identical input exactly once with `--confirm --quote-token <quote_token>`.
+- Preserve the same `request_id` after an uncertain response. Use a new ID only for a genuinely new operation.
+- Read the latest object before a concurrent write and preserve its `revision` or `base_version` when required.
 
-## Classify the side effect
+Never turn a read request into a write, paid task, upload, public message, deletion, or retry of an uncertain create.
 
-- Navigation and reads: run after showing the requested target.
-- External AI and ordinary writes: require current user authorization and the CLI's `--confirm` gate.
-- Paid actions: first run without `--confirm`, show the returned cost and points, then wait for explicit approval. Reuse the identical input with `--confirm --quote-token <quote_token>` exactly once.
-- Idempotent writes: preserve the same `request_id` after an uncertain response; use a new ID only for a genuinely new operation.
-- Concurrent resources: read the latest object and preserve its `revision` or `base_version` when writing.
+## Prepare exact input
 
-Never turn a read request into a write, paid task, upload, public message, or deletion.
+Pass one UTF-8 JSON object through stdin or `--input @file`, within the schema from `hq describe`.
 
-## Prepare input safely
+- For uploads, pass one explicit supported file with `--file`. Never scan directories, follow symbolic links, or expose local paths as generation input.
+- For collection, pass exactly one supported public content URL. Reject copied share commands, prose containing a URL, credentials, local paths, unsupported hosts, and unusual ports.
+- Follow the returned provider and channel constraints instead of relying on remembered model parameters.
 
-Pass a UTF-8 JSON object through stdin or `--input @file`. Keep input within the schema returned by `hq describe`.
+## Verify delivery
 
-For image upload, pass one explicit absolute PNG/JPG/WebP path with `--file`. For `video-upload`, pass one explicit absolute MP4/MOV/WebM path no larger than 32 MiB. Both uploads require `--confirm`; never scan directories, follow symbolic links, or expose the local path or filename as generation input.
-
-For `image-generate`, Banana uses `provider=banana`, `model=nb2|pro`, its listed ratios, and at most 14 references. For `video-generate`, Sora uses `channel=sora`, `model=sora-2|sora-2-pro`, `seconds=4|8|12`, and at most one reference; do not send `duration` or `generate_audio`. Follow the returned `constraints` for every provider or channel.
-
-For `digital-ip-text-generate`, use one ready `avatar_id` owned by the current account plus `text` and `voice`. For `digital-ip-audio-generate`, use one owned `avatar_id` and copy the at-most-500-character `audio_file` from the current account's asset result; never substitute a URL, local path, upload, or base64 audio. For `digital-ip-batch-generate`, pass 2–5 `avatars` objects containing distinct owned `avatar_id` values; all items share one `text` and `voice`.
-
-For `cinematic-open-generate`, provide either one compatible `avatar_id` or 1–3 distinct `avatar_ids`, plus `prompt`. Avatar looks and private `reference_image_upload_ids` share 9 image slots: 1/2/3 avatars leave room for 8/7/6 reference images; optionally add at most 3 private `reference_video_upload_ids`. `cinematic-motion-generate` requires one owned `avatar_id` and exactly one `reference_video_upload_ids` item. `tryon-fast-generate` requires private person and clothes image upload IDs. `tryon-classic-generate` requires one private person video upload ID plus a clothes image upload ID, a background image upload ID, or both.
-
-For `collect-content`, `collect-video`, and `collect-transcript`, pass exactly one public Douyin, Xiaohongshu, or WeChat Channels HTTP(S) content URL with no explicit port or port 80/443. Channels must use a `https://weixin.qq.com/sph/...` share URL. Reject share commands, prose containing a URL, credentials, local paths, other ports, and other hosts. `collect-search` accepts only `platform=douyin|xhs`, a keyword, and an optional page (default 1). `leads-generate` accepts 1–3 unique platforms from `douyin|xhs|channels`; `count=1..30` and `pages=1..3` are optional. Require `keyword` whenever Douyin or Xiaohongshu is selected, and require `channels_targets` whenever Channels is selected. Mixed platform requests require both.
-
-## Verify the result
-
-- Check the process exit code and JSON `schema`.
-- For asynchronous work, read the returned task with the supported task capability until terminal.
-- All five collect / leads paid actions are asynchronous. After confirmation, preserve the returned `job_id` and poll only `task`. Read full comments and transcript text from `task.result`; `assets` with `kind=collect` stores only a summary plus the saved video link. Leads also appear as full `assets` records with `kind=leads`, while `collect-search` keeps its items only in `task.result`. Never resubmit merely because the task is still running.
-- A provider `completed` state alone is insufficient for media delivery; confirm the result URL exists and the requested artifact is usable.
-- Report the capability, side effect, confirmation used, task or resource ID, final status, and any remaining user action. Never print credentials.
+- Check the exit code, JSON `schema`, capability ID, and returned task or resource ID.
+- For asynchronous work, poll only the supported task capability until terminal. Do not resubmit merely because it is still running.
+- For media, confirm that the requested artifact exists and is usable; a provider `completed` state alone is insufficient.
+- Reconcile quote, debit, refund, and final status for paid work.
+- Report the capability, confirmation used, task or resource ID, final status, delivered artifact, and remaining user action. Never print credentials.
