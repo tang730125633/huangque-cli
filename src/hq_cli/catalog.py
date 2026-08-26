@@ -340,6 +340,25 @@ CAPABILITIES["asset-tags"] = _api(
     {**ASSET_MARK_FIELDS, "tags": {"type": "array", "maxItems": 8,
                                     "items": {"type": "string", "minLength": 1, "maxLength": 24}}},
     ["kind", "key", "tags"], "assets:write", "write", True)
+ASSET_DELETE_KINDS = ["image", "audio", "video", "copy", "collect", "leads", "breakdown"]
+CAPABILITIES["asset-delete"] = _api(
+    "asset-delete", "删除资产", "asset-delete",
+    "永久删除当前账号自产资产；先用 assets 读取核对 kind 与 keys，删除不可恢复。",
+    {
+        "kind": {"type": "string", "enum": ASSET_DELETE_KINDS},
+        "keys": {"type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": True,
+                 "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+    },
+    ["kind", "keys"], "assets:write", "delete", True)
+CAPABILITIES["asset-delete"]["constraints"] = [
+    "keys must be asset keys returned by the assets read capability for the same kind",
+    "only assets owned by the current account can be deleted; anything else is rejected",
+    "avatar kind is not deletable through this capability",
+    "deletion is irreversible and always requires --confirm",
+]
+CAPABILITIES["asset-delete"]["next_actions"] = [
+    "删除不可恢复；先用 assets 读取核对 keys，再以 --confirm 确认删除。",
+]
 
 COMPOSE_PROJECT_ID = {"type": "string", "pattern": "^compose_[0-9a-f]{32}$"}
 DP_PROJECT_ID = {"type": "string", "pattern": "^dp_[0-9a-f]{32}$"}
