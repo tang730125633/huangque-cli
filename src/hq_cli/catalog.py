@@ -140,6 +140,8 @@ for item in (
      {"prompt": {"type": "string", "minLength": 1, "maxLength": 2000}}, "account_for_actions"),
     ("text-video", "文案成片", "/workbench/text-video", "进入文案成片页；页面入口不会直接提交生成。",
      None, "account_for_actions"),
+    ("matrix-template", "模板成片", "/workbench/matrix-template.html", "进入模板成片页；页面入口不会直接提交生成。",
+     None, "account_for_actions"),
     ("short-drama", "短剧创作", "/workbench/short-drama", "进入短剧创作页；页面入口不会直接创建项目或生成素材。",
      None, "account_for_actions"),
     ("one-click-video", "一键成片", "/workbench/one-click-video", "用一个已完成的视频资产进入一键成片工作台。",
@@ -233,6 +235,12 @@ CAPABILITIES["ip12-project"] = _api(
 CAPABILITIES["ip12-create"] = _api(
     "ip12-create", "创建 IP12 项目", "ip12-create", "在当前账号创建一个新的 IP12 项目。",
     {"title": {"type": "string", "minLength": 1, "maxLength": 120}}, ["title"], "ip12:write", "write", True)
+CAPABILITIES["ip12-delete"] = _api(
+    "ip12-delete", "删除 IP12 项目", "ip12-delete", "删除当前账号的一个 IP12 项目；删除前应先读取并核对目标。",
+    {"project_id": STRING_ID}, ["project_id"], "ip12:write", "delete", True)
+CAPABILITIES["ip12-delete"]["next_actions"] = [
+    "删除不可恢复；先用 ip12-project 读取核对 project_id，再以 --confirm 确认删除。",
+]
 CAPABILITIES["ip12-report"] = _api(
     "ip12-report", "读取 IP12 报告", "ip12-report", "读取一个本人 Hermes IP12 项目已经保存的模块报告；不会重新生成报告。",
     {"project_id": STRING_ID}, ["project_id"], "ip12:read")
@@ -343,21 +351,26 @@ CAPABILITIES["asset-tags"] = _api(
 ASSET_DELETE_KINDS = ["image", "audio", "video", "copy", "collect", "leads", "breakdown"]
 CAPABILITIES["asset-delete"] = _api(
     "asset-delete", "删除资产", "asset-delete",
-    "永久删除当前账号自产资产；先用 assets 读取核对 kind 与 keys，删除不可恢复。",
+    "永久删除当前账号自产资产；先用 assets 读取核对 kind 与 id/keys，删除不可恢复。",
     {
         "kind": {"type": "string", "enum": ASSET_DELETE_KINDS},
+        "id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
         "keys": {"type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": True,
                  "items": {"type": "string", "minLength": 1, "maxLength": 500}},
     },
-    ["kind", "keys"], "assets:write", "delete", True)
+    ["kind"], "assets:write", "delete", True)
+CAPABILITIES["asset-delete"]["input_schema"]["oneOf"] = [
+    {"required": ["id"]}, {"required": ["keys"]},
+]
 CAPABILITIES["asset-delete"]["constraints"] = [
-    "keys must be asset keys returned by the assets read capability for the same kind",
+    "provide exactly one of id (single delete) or keys (batch 1-200, same kind)",
+    "id and keys must come from the assets read capability for the same kind",
     "only assets owned by the current account can be deleted; anything else is rejected",
     "avatar kind is not deletable through this capability",
     "deletion is irreversible and always requires --confirm",
 ]
 CAPABILITIES["asset-delete"]["next_actions"] = [
-    "删除不可恢复；先用 assets 读取核对 keys，再以 --confirm 确认删除。",
+    "删除不可恢复；先用 assets 读取核对 id/keys，再以 --confirm 确认删除。",
 ]
 
 COMPOSE_PROJECT_ID = {"type": "string", "pattern": "^compose_[0-9a-f]{32}$"}
@@ -597,6 +610,7 @@ AVATAR_ID = {
 }
 IMAGE_UPLOAD_ID = {"type": "string", "minLength": 36, "maxLength": 36}
 VIDEO_UPLOAD_ID = {"type": "string", "minLength": 36, "maxLength": 36}
+AUDIO_UPLOAD_ID = {"type": "string", "minLength": 36, "maxLength": 36}
 TALKING_VIDEO_FIELDS = {
     "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1", "4:5", "5:4"]},
     "motion": {"type": "string", "enum": ["low", "medium", "high"]},
@@ -618,16 +632,19 @@ VIDEO_LIPSYNC_FIELDS = {
 }
 DIGITAL_IP_TEXT_FIELDS = {
     "avatar_id": AVATAR_ID,
+    "image_upload_id": IMAGE_UPLOAD_ID,
     "text": {"type": "string", "minLength": 1, "maxLength": 1000},
     "voice": {"type": "string", "minLength": 1, "maxLength": 128},
     **TALKING_VIDEO_FIELDS,
 }
 DIGITAL_IP_AUDIO_FIELDS = {
     "avatar_id": AVATAR_ID,
+    "image_upload_id": IMAGE_UPLOAD_ID,
     "audio_file": {
         "type": "string", "minLength": 1, "maxLength": 500,
         "description": "从当前账号资产结果取得的 audio_file；不是 URL 或本机路径",
     },
+    "audio_upload_id": AUDIO_UPLOAD_ID,
     **TALKING_VIDEO_FIELDS,
 }
 DIGITAL_IP_BATCH_FIELDS = {
@@ -679,16 +696,45 @@ TRYON_CLASSIC_FIELDS = {
     "seconds": {"type": "integer", "minimum": 1, "maximum": 6},
 }
 
+TEXT_VIDEO_AVATAR_ID = {"type": "string", "pattern": "^local_avatar_[0-9a-f]{32}$"}
+TEXT_VIDEO_PLAN_ID = {"type": "string", "pattern": "^talking_plan_[0-9a-f]{32}$"}
+TEXT_VIDEO_SCENE_ID = {"type": "string", "pattern": "^scene_[0-9]{2}$"}
+TEXT_VIDEO_FIELDS = {
+    "text": {"type": "string", "minLength": 2, "maxLength": 1000},
+    "template": {"type": "string", "minLength": 1, "maxLength": 240},
+    "mode": {"type": "string", "enum": ["generate", "fixed"]},
+    "style": {"type": "string", "minLength": 1, "maxLength": 80},
+    "voice": {"type": "string", "minLength": 1, "maxLength": 200},
+    "speech_rate": {"type": "number", "minimum": 0.5, "maximum": 2.0},
+    "talking_material": _schema({
+        "enabled": {"type": "boolean", "const": True},
+        "plan_id": TEXT_VIDEO_PLAN_ID,
+        "source_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "ratio": {"type": "number", "minimum": 0.1, "maximum": 0.5},
+        "default_avatar_asset_id": TEXT_VIDEO_AVATAR_ID,
+        "scenes": {"type": "array", "minItems": 1, "maxItems": 20, "items": _schema({
+            "scene_id": TEXT_VIDEO_SCENE_ID, "enabled": {"type": "boolean"},
+            "avatar_asset_id": TEXT_VIDEO_AVATAR_ID,
+        }, ["scene_id", "enabled"])},
+    }, ["enabled", "plan_id", "source_hash", "ratio", "default_avatar_asset_id", "scenes"]),
+}
+TEXT_VIDEO_PLAN_FIELDS = {
+    key: value for key, value in TEXT_VIDEO_FIELDS.items() if key != "talking_material"
+}
+TEXT_VIDEO_PLAN_FIELDS["ratio"] = {"type": "number", "minimum": 0.1, "maximum": 0.5}
+
 for identifier, name, fields, required in (
     ("image-generate", "图片生成", IMAGE_FIELDS, ["prompt"]),
     ("video-generate", "视频生成", VIDEO_FIELDS, ["prompt"]),
     ("video-lipsync", "原视频口型同步", VIDEO_LIPSYNC_FIELDS,
      ["video_asset_id", "audio_asset_id"]),
     ("audio-generate", "音频生成", AUDIO_FIELDS, ["text"]),
+    ("text-video-generate", "文案成片生成", TEXT_VIDEO_FIELDS,
+     ["text", "template", "style", "voice"]),
     ("digital-ip-text-generate", "数字IP单条文案生成", DIGITAL_IP_TEXT_FIELDS,
-     ["avatar_id", "text", "voice"]),
+     ["text", "voice"]),
     ("digital-ip-audio-generate", "数字IP本人资产音频生成", DIGITAL_IP_AUDIO_FIELDS,
-     ["avatar_id", "audio_file"]),
+     []),
     ("digital-ip-batch-generate", "数字IP批量文案生成", DIGITAL_IP_BATCH_FIELDS,
      ["avatars", "text", "voice"]),
     ("cinematic-open-generate", "电影化身开放式生成", CINEMATIC_OPEN_FIELDS,
@@ -742,6 +788,40 @@ CAPABILITIES["cinematic-open-generate"]["input_schema"]["oneOf"] = [
 CAPABILITIES["tryon-classic-generate"]["input_schema"]["anyOf"] = [
     {"required": ["clothes_upload_id"]}, {"required": ["background_upload_id"]},
 ]
+CAPABILITIES["digital-ip-text-generate"]["input_schema"]["oneOf"] = [
+    {"required": ["avatar_id"]}, {"required": ["image_upload_id"]},
+]
+CAPABILITIES["digital-ip-audio-generate"]["input_schema"]["oneOf"] = [
+    {"required": ["avatar_id", "audio_file"]}, {"required": ["avatar_id", "audio_upload_id"]},
+    {"required": ["image_upload_id", "audio_file"]}, {"required": ["image_upload_id", "audio_upload_id"]},
+]
+CAPABILITIES["text-video-generate"]["constraints"] = [
+    "template, style, and voice must be selected from text-video-templates, text-video-styles, and text-video-voices",
+    "mode defaults to generate; fixed preserves the supplied copy and automatically splits scenes",
+    "the first call returns scene_count and cost_breakdown without submitting a paid task",
+    "talking_material must come from text-video-plan and owner-scoped text-video-avatar-import results",
+]
+CAPABILITIES["text-video-generate"]["next_actions"] = [
+    "核对 scene_count 和 cost_breakdown 后，用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后仅使用 task 轮询。",
+]
+CAPABILITIES["text-video-avatar-import"] = _api(
+    "text-video-avatar-import", "导入口播人物", "text-video-avatar-import",
+    "把本人 image-upload 的临时图片导入为文案成片人物资产。",
+    {"image_upload_id": IMAGE_UPLOAD_ID}, ["image_upload_id"],
+    "assets:upload", "write", True,
+)
+CAPABILITIES["text-video-avatar-import"]["next_actions"] = [
+    "保存返回的 asset_id；可作为默认人物或某个口播分镜的 avatar_asset_id。",
+]
+CAPABILITIES["text-video-plan"] = _api(
+    "text-video-plan", "规划口播分镜", "text-video-plan",
+    "生成可确认的口播分镜方案。",
+    TEXT_VIDEO_PLAN_FIELDS, ["text", "template", "style", "voice"],
+    "generation:quote", "write", True,
+)
+CAPABILITIES["text-video-plan"]["next_actions"] = [
+    "把 plan_id、source_hash、ratio、人物 asset_id 和逐分镜 enabled 组合为 text-video-generate.talking_material。",
+]
 
 CAPABILITIES["image-generate"]["constraints"] = [
     "image_upload_id and reference_upload_ids are mutually exclusive",
@@ -774,9 +854,9 @@ CAPABILITIES["digital-ip-text-generate"]["constraints"] = [
     "output resolution is fixed by the main site at 1080p",
 ]
 CAPABILITIES["digital-ip-audio-generate"]["constraints"] = [
-    "avatar_id must identify a ready avatar owned by the current account",
+    "provide exactly one of avatar_id or image_upload_id, and exactly one of audio_file or audio_upload_id",
     "audio_file must be copied from the current account's assets result and must be mp3|wav|m4a",
-    "URLs, local paths, audio uploads, and base64 audio are not accepted",
+    "audio_upload_id must come from a private upload; URLs and local paths are not accepted",
     "output resolution is fixed by the main site at 1080p",
 ]
 CAPABILITIES["digital-ip-batch-generate"]["constraints"] = [
@@ -834,6 +914,8 @@ for identifier, website_modes in {
     "digital-presenter-create": ["digitalPresenter"],
     "digital-presenter-update": ["digitalPresenter"],
     "text-video": ["text_video"], "text-video-capability": ["text_video"],
+    "text-video-generate": ["text_video"], "text-video-avatar-import": ["text_video"],
+    "text-video-plan": ["text_video"],
     "text-video-templates": ["text_video"], "text-video-styles": ["text_video"],
     "text-video-voices": ["text_video"],
     "short-drama": ["live_action"],
