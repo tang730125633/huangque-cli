@@ -476,7 +476,7 @@ class HqCliTests(unittest.TestCase):
             "canvas-delete": b'{"board_id":"cb_1"}',
             "video-compose-delete": b'{"project_id":"compose_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_revision":2}',
             "digital-presenter-delete": b'{"board_id":"cb_1","project_id":"dp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","revision":3}',
-            "short-drama-create": '{"title":"新剧","synopsis":"一个八集短剧的故事","ratio":"9:16","target_duration":"15-30","shot_count":6,"request_id":"hqcli-sd-001"}'.encode(),
+            "short-drama-create": '{"title":"新剧","synopsis":"一个八集短剧的故事","ratio":"9:16","target_duration":30,"shot_count":6,"request_id":"hqcli-sd-001"}'.encode(),
             "short-drama-delete": b'{"project_id":"p_1","revision":1}',
             "leads-delete": b'{"lead_ids":["0123456789abcdef"]}',
             "digital-ip-create": '{"title":"新 IP"}'.encode(),
