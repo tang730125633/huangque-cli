@@ -76,19 +76,25 @@ class HqCliTests(unittest.TestCase):
         by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
         expected = {
             "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-delete", "ip12-report", "ip12-message",
-            "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "tasks", "task",
+            "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "canvas-delete", "tasks", "task",
             "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags", "asset-delete",
+            "voice-clone-create", "voice-clone-status",
             "image-generate", "video-generate", "video-lipsync", "audio-generate",
             "text-video-generate", "text-video-plan", "text-video-avatar-import",
             "digital-ip-text-generate", "digital-ip-audio-generate", "digital-ip-batch-generate",
             "cinematic-open-generate", "cinematic-motion-generate",
             "tryon-fast-generate", "tryon-classic-generate",
             "digital-ip-projects", "digital-ip-project", "digital-ip-report",
+            "digital-ip-create", "digital-ip-update", "digital-ip-delete",
             "text-video-capability", "text-video-templates", "text-video-styles", "text-video-voices", "pricing",
             "inspiration-catalog", "inspiration-likes", "inspiration-like",
             "collect-content", "collect-video", "collect-transcript", "collect-search", "leads-generate",
-            "leads-crm", "leads-crm-upsert", "video-avatars", "audio-slots",
+            "leads-crm", "leads-crm-upsert", "leads-delete", "video-avatars", "audio-slots",
             "short-drama-projects", "short-drama-project", "short-drama-conversation", "short-drama-preflight",
+            "short-drama-create", "short-drama-delete",
+            "video-compose-projects", "video-compose-project", "video-compose-create", "video-compose-delete",
+            "digital-presenter-capability", "digital-presenter-project", "digital-presenter-create",
+            "digital-presenter-update", "digital-presenter-delete",
         }
         self.assertTrue(expected <= set(by_id))
         self.assertTrue(all(by_id[item]["availability"] == "available" for item in expected))
@@ -467,6 +473,15 @@ class HqCliTests(unittest.TestCase):
             "canvas-ops": b'{"board_id":"cb_1","base_version":1,"op_id":"hqcli-abcdefghijkl","ops":[{"type":"node.patch","id":"n1","fields":{"x":120}}]}',
             "asset-tags": '{"kind":"image","key":"asset-1","tags":["客户案例"]}'.encode(),
             "asset-delete": b'{"kind":"video","keys":["v_1"]}',
+            "canvas-delete": b'{"board_id":"cb_1"}',
+            "video-compose-delete": b'{"project_id":"compose_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_revision":2}',
+            "digital-presenter-delete": b'{"board_id":"cb_1","project_id":"dp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","revision":3}',
+            "short-drama-create": '{"title":"新剧","synopsis":"一个八集短剧的故事","ratio":"9:16","target_duration":"15-30","shot_count":6,"request_id":"hqcli-sd-001"}'.encode(),
+            "short-drama-delete": b'{"project_id":"p_1","revision":1}',
+            "leads-delete": b'{"lead_ids":["0123456789abcdef"]}',
+            "digital-ip-create": '{"title":"新 IP"}'.encode(),
+            "digital-ip-update": '{"project_id":"p_1","revision":2,"title":"改名"}'.encode(),
+            "digital-ip-delete": b'{"project_id":"p_1","revision":2}',
             "inspiration-like": b'{"id":1001,"favorite":true}',
             "leads-crm-upsert": '{"lead_id":"0123456789abcdef","follow_status":"跟进中"}'.encode(),
             "video-compose-review": ('{"project_id":"compose_%s","expected_revision":2,'

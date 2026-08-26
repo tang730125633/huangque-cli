@@ -34,7 +34,7 @@ LOGIN_SCOPES = [
     "canvas:write", "canvas:agent", "canvas:edit", "tasks:read", "assets:read", "assets:write", "assets:upload",
     "generation:quote", "generation:submit",
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
-    "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read",
+    "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read", "short-drama:write",
 ]
 
 

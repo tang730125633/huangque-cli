@@ -176,6 +176,20 @@ CAPABILITIES["digital-ip-project"] = _api(
 CAPABILITIES["digital-ip-report"] = _api(
     "digital-ip-report", "数字化 IP 报告", "digital-ip-report", "读取一个数字化 IP 项目已经保存的报告；不会重新生成。",
     {"project_id": STRING_ID}, ["project_id"], "ip12:read")
+CAPABILITIES["digital-ip-create"] = _api(
+    "digital-ip-create", "创建数字化 IP 项目", "digital-ip-create", "在当前账号创建一个数字 IP 项目。",
+    {"title": {"type": "string", "minLength": 1, "maxLength": 80}}, ["title"], "ip12:write", "write", True)
+CAPABILITIES["digital-ip-update"] = _api(
+    "digital-ip-update", "更新数字化 IP 项目", "digital-ip-update", "按 revision 更新一个本人数字 IP 项目的标题。",
+    {"project_id": STRING_ID,
+     "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+     "title": {"type": "string", "minLength": 1, "maxLength": 80}},
+    ["project_id", "revision", "title"], "ip12:write", "write", True)
+CAPABILITIES["digital-ip-delete"] = _api(
+    "digital-ip-delete", "删除数字化 IP 项目", "digital-ip-delete", "删除一个本人数字 IP 项目；删除前应先读取并核对目标。",
+    {"project_id": STRING_ID,
+     "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}},
+    ["project_id", "revision"], "ip12:write", "delete", True)
 for identifier, name, description in (
     ("text-video-capability", "文案成片可用状态", "读取文案成片功能开关和可用状态。"),
     ("text-video-templates", "文案成片模板", "读取文案成片可用模板。"),
@@ -207,12 +221,27 @@ CAPABILITIES["leads-crm-upsert"] = _api(
      "follow_status": {"type": "string", "enum": ["待跟进", "跟进中", "已加微", "已成交", "无效"]},
      "follow_note": {"type": "string", "maxLength": 300}},
     ["lead_id"], "leads:write", "write", True)
+CAPABILITIES["leads-delete"] = _api(
+    "leads-delete", "删除获客跟进", "leads-delete", "永久删除当前账号的客户跟进记录；删除前应先读取并核对目标。",
+    {"lead_ids": {"type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
+                  "items": {"type": "string", "pattern": "^[0-9a-f]{16,40}$"}}},
+    ["lead_ids"], "leads:write", "delete", True)
 CAPABILITIES["video-avatars"] = _api(
     "video-avatars", "数字人形象", "video-avatars", "读取当前账号可用的数字人形象。",
     {"limit": LIMIT}, scope="assets:read")
 CAPABILITIES["audio-slots"] = _api(
     "audio-slots", "声音克隆槽位", "audio-slots", "读取当前账号的声音克隆槽位、状态和当前价格。",
     scope="assets:read")
+CAPABILITIES["voice-clone-create"] = _api(
+    "voice-clone-create", "创建声音克隆", "voice-clone-create", "用本人样音在选定槽位创建或重新录制个人克隆音色。",
+    {"slot_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{1,87}$"},
+     "name": {"type": "string", "minLength": 1, "maxLength": 40},
+     "audio_upload_id": {"type": "string", "minLength": 36, "maxLength": 36}},
+    ["slot_id", "name", "audio_upload_id"], "assets:write", "write", True)
+CAPABILITIES["voice-clone-status"] = _api(
+    "voice-clone-status", "声音克隆状态", "voice-clone-status", "读取一个本人声音克隆槽位的处理状态。",
+    {"slot_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{1,87}$"}},
+    ["slot_id"], "assets:read")
 CAPABILITIES["short-drama-projects"] = _api(
     "short-drama-projects", "短剧项目列表", "short-drama-projects", "读取当前账号可访问的短剧项目。",
     {"page": {"type": "integer", "minimum": 1, "maximum": 100000},
@@ -227,6 +256,23 @@ for identifier, name, description in (
         {"project_id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
                         "minLength": 36, "maxLength": 36}},
         ["project_id"], "short-drama:read")
+CAPABILITIES["short-drama-create"] = _api(
+    "short-drama-create", "创建短剧项目", "short-drama-create", "在当前账号创建一个短剧项目；request_id 用于幂等重试。",
+    {"title": {"type": "string", "minLength": 1, "maxLength": 80},
+     "synopsis": {"type": "string", "minLength": 8, "maxLength": 4000},
+     "ratio": {"type": "string", "enum": ["9:16", "16:9"]},
+     "target_duration": {"type": "string", "enum": ["15-30", "30-60", "60-90"]},
+     "shot_count": {"type": "integer", "minimum": 6, "maximum": 10},
+     "genre": {"type": "string", "maxLength": 40},
+     "visual_style": {"type": "string", "maxLength": 80},
+     "request_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,128}$"}},
+    ["title", "synopsis", "ratio", "target_duration", "shot_count", "request_id"],
+    "short-drama:write", "write", True)
+CAPABILITIES["short-drama-delete"] = _api(
+    "short-drama-delete", "删除短剧项目", "short-drama-delete", "删除一个本人短剧项目；删除前应先读取并核对目标。",
+    {"project_id": {"type": "string", "minLength": 1, "maxLength": 160},
+     "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}},
+    ["project_id", "revision"], "short-drama:write", "delete", True)
 CAPABILITIES["ip12-projects"] = _api(
     "ip12-projects", "IP12 项目列表", "ip12-projects", "读取当前账号在主站 Hermes IP12 中的全部诊断项目。", scope="ip12:read")
 CAPABILITIES["ip12-project"] = _api(
@@ -298,6 +344,9 @@ CAPABILITIES["canvas-ops"]["constraints"] = [
     "Allowed created node types: text, gen, video",
     "Delete, generated outputs, board snapshots, members, and scripts are rejected",
 ]
+CAPABILITIES["canvas-delete"] = _api(
+    "canvas-delete", "删除画布", "canvas-delete", "删除本人创建的画布；只有所有者可删，删除不可恢复。",
+    {"board_id": STRING_ID}, ["board_id"], "canvas:write", "delete", True)
 CAPABILITIES["tasks"] = _api(
     "tasks", "任务列表", "tasks", "按账号读取生成任务、状态、扣点和退款结果。",
     {"days": {"type": "integer", "minimum": 1, "maximum": 365},
@@ -400,6 +449,10 @@ CAPABILITIES["video-compose-render"] = _api(
     "video-compose-render", "渲染一键成片", "video-compose-render", "按已确认 EDL 使用主站默认模板渲染 MP4，并写入本人视频资产。",
     {"project_id": COMPOSE_PROJECT_ID, "expected_revision": REVISION},
     ["project_id", "expected_revision"], "video-compose:write", "write", True)
+CAPABILITIES["video-compose-delete"] = _api(
+    "video-compose-delete", "删除一键成片项目", "video-compose-delete", "删除一个本人一键成片项目；删除前应先读取并核对目标。",
+    {"project_id": COMPOSE_PROJECT_ID, "expected_revision": REVISION},
+    ["project_id", "expected_revision"], "video-compose:write", "delete", True)
 
 DP_FIELDS = {
     "title": {"type": "string", "minLength": 1, "maxLength": 80},
@@ -423,6 +476,10 @@ CAPABILITIES["digital-presenter-update"] = _api(
     "digital-presenter-update", "更新数字人口播项目", "digital-presenter-update", "按 revision 更新本人有编辑权限的数字人口播项目。",
     {"board_id": STRING_ID, "project_id": DP_PROJECT_ID, "revision": REVISION, **DP_FIELDS},
     ["board_id", "project_id", "revision"], "digital-presenter:write", "write", True)
+CAPABILITIES["digital-presenter-delete"] = _api(
+    "digital-presenter-delete", "删除数字人口播项目", "digital-presenter-delete", "按 revision 删除本人有编辑权限的数字人口播项目。",
+    {"board_id": STRING_ID, "project_id": DP_PROJECT_ID, "revision": REVISION},
+    ["board_id", "project_id", "revision"], "digital-presenter:write", "delete", True)
 
 IMAGE_FIELDS = {
     "prompt": {"type": "string", "minLength": 1, "maxLength": 2000},
@@ -907,18 +964,22 @@ for identifier, website_modes in {
     "video-compose-projects": ["one_click"], "video-compose-project": ["one_click"],
     "video-compose-create": ["one_click"], "video-compose-analyze": ["one_click"],
     "video-compose-review": ["one_click"], "video-compose-render": ["one_click"],
+    "video-compose-delete": ["one_click"],
     "canvas": ["agent", "image_node", "video_node", "digitalPresenter"],
+    "canvas-delete": ["agent"],
     "canvas-agent-plan": ["agent"],
     "digital-presenter-capability": ["digitalPresenter"],
     "digital-presenter-project": ["digitalPresenter"],
     "digital-presenter-create": ["digitalPresenter"],
     "digital-presenter-update": ["digitalPresenter"],
+    "digital-presenter-delete": ["digitalPresenter"],
     "text-video": ["text_video"], "text-video-capability": ["text_video"],
     "text-video-generate": ["text_video"], "text-video-avatar-import": ["text_video"],
     "text-video-plan": ["text_video"],
     "text-video-templates": ["text_video"], "text-video-styles": ["text_video"],
     "text-video-voices": ["text_video"],
     "short-drama": ["live_action"],
+    "short-drama-create": ["live_action"], "short-drama-delete": ["live_action"],
     "short-drama-projects": ["live_action"], "short-drama-project": ["live_action"],
     "short-drama-conversation": ["live_action"], "short-drama-preflight": ["live_action"],
     "inspiration-catalog": ["inspiration.browse"], "inspiration-likes": ["inspiration.like"],
@@ -930,9 +991,12 @@ for identifier, website_modes in {
     "collect-search": ["collect.keyword.search"],
     "leads": ["leads.keyword.search"], "leads-generate": ["leads.keyword.search"],
     "leads-crm": ["leads.crm.update"], "leads-crm-upsert": ["leads.crm.update"],
+    "leads-delete": ["leads.crm.update"],
     "video-avatars": ["cinematic", "digital_ip", "live_action"], "audio-slots": ["tts"],
+    "voice-clone-create": ["tts"], "voice-clone-status": ["tts"],
     "digital-ip-projects": ["digital_ip"], "digital-ip-project": ["digital_ip"],
     "digital-ip-report": ["digital_ip"],
+    "digital-ip-create": ["digital_ip"], "digital-ip-update": ["digital_ip"], "digital-ip-delete": ["digital_ip"],
     "pricing-page": ["pricing.catalog"], "pricing": ["pricing.catalog"],
     "invite": ["invite.dashboard", "invite.poster"],
     "recharge": ["recharge"], "bots": ["bots"],
