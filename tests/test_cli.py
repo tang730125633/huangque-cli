@@ -77,7 +77,7 @@ class HqCliTests(unittest.TestCase):
         expected = {
             "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-report", "ip12-message",
             "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "tasks", "task",
-            "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags",
+            "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags", "asset-delete",
             "image-generate", "video-generate", "video-lipsync", "audio-generate",
             "digital-ip-text-generate", "digital-ip-audio-generate", "digital-ip-batch-generate",
             "cinematic-open-generate", "cinematic-motion-generate",
@@ -457,6 +457,7 @@ class HqCliTests(unittest.TestCase):
             "canvas-create": b'{"name":"Launch","prompt":"first idea"}',
             "canvas-ops": b'{"board_id":"cb_1","base_version":1,"op_id":"hqcli-abcdefghijkl","ops":[{"type":"node.patch","id":"n1","fields":{"x":120}}]}',
             "asset-tags": '{"kind":"image","key":"asset-1","tags":["客户案例"]}'.encode(),
+            "asset-delete": b'{"kind":"video","keys":["v_1"]}',
             "inspiration-like": b'{"id":1001,"favorite":true}',
             "leads-crm-upsert": '{"lead_id":"0123456789abcdef","follow_status":"跟进中"}'.encode(),
             "video-compose-review": ('{"project_id":"compose_%s","expected_revision":2,'
@@ -475,6 +476,7 @@ class HqCliTests(unittest.TestCase):
         cases = {
             "inspiration-like": {"id": 1001, "favorite": True},
             "leads-crm-upsert": {"lead_id": "0123456789abcdef", "follow_status": "跟进中"},
+            "asset-delete": {"kind": "image", "keys": ["img-1"]},
         }
         for identifier, payload in cases.items():
             with self.subTest(identifier=identifier), \
@@ -776,6 +778,10 @@ class HqCliTests(unittest.TestCase):
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"minimax","resolution":"768p"}'),
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"sora","seconds":5}'),
             (["run", "asset-tags", "--input", "@-"], b'{"kind":"image","key":"x","tags":"not-array"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"avatar","keys":["a_1"]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":[]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":"v_1"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":["v_1","v_1"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["twitter"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"platforms":["douyin"],"channels_targets":["target"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["channels"]}'),
