@@ -75,19 +75,26 @@ class HqCliTests(unittest.TestCase):
         _, output, _ = self.invoke(["capabilities"])
         by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
         expected = {
-            "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-report", "ip12-message",
-            "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "tasks", "task",
+            "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-delete", "ip12-report", "ip12-message",
+            "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "canvas-delete", "tasks", "task",
             "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags", "asset-delete",
+            "voice-clone-create", "voice-clone-status",
             "image-generate", "video-generate", "video-lipsync", "audio-generate",
+            "text-video-generate", "text-video-plan", "text-video-avatar-import",
             "digital-ip-text-generate", "digital-ip-audio-generate", "digital-ip-batch-generate",
             "cinematic-open-generate", "cinematic-motion-generate",
             "tryon-fast-generate", "tryon-classic-generate",
             "digital-ip-projects", "digital-ip-project", "digital-ip-report",
+            "digital-ip-create", "digital-ip-update", "digital-ip-delete",
             "text-video-capability", "text-video-templates", "text-video-styles", "text-video-voices", "pricing",
             "inspiration-catalog", "inspiration-likes", "inspiration-like",
             "collect-content", "collect-video", "collect-transcript", "collect-search", "leads-generate",
-            "leads-crm", "leads-crm-upsert", "video-avatars", "audio-slots",
+            "leads-crm", "leads-crm-upsert", "leads-delete", "video-avatars", "audio-slots",
             "short-drama-projects", "short-drama-project", "short-drama-conversation", "short-drama-preflight",
+            "short-drama-create", "short-drama-delete",
+            "video-compose-projects", "video-compose-project", "video-compose-create", "video-compose-delete",
+            "digital-presenter-capability", "digital-presenter-project", "digital-presenter-create",
+            "digital-presenter-update", "digital-presenter-delete",
         }
         self.assertTrue(expected <= set(by_id))
         self.assertTrue(all(by_id[item]["availability"] == "available" for item in expected))
@@ -129,7 +136,11 @@ class HqCliTests(unittest.TestCase):
             by_id["video-lipsync"]["input_schema"]["properties"]["quality"]["enum"],
         )
         self.assertEqual(
-            ["avatar_id", "audio_file"],
+            ["text", "voice"],
+            by_id["digital-ip-text-generate"]["input_schema"]["required"],
+        )
+        self.assertEqual(
+            [],
             by_id["digital-ip-audio-generate"]["input_schema"]["required"],
         )
         self.assertEqual(
@@ -178,6 +189,7 @@ class HqCliTests(unittest.TestCase):
         by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
         navigation = {
             "text-video": "/workbench/text-video", "short-drama": "/workbench/short-drama",
+            "matrix-template": "/workbench/matrix-template.html",
             "pricing-page": "/workbench/pricing", "invite": "/workbench/invite",
             "recharge": "/workbench/recharge", "bots": "/workbench/bots",
         }
@@ -453,11 +465,23 @@ class HqCliTests(unittest.TestCase):
         inputs = {
             "prompt-optimize": b'{"prompt":"better portrait","kind":"image"}',
             "ip12-create": b'{"title":"My IP"}',
+            "ip12-delete": b'{"project_id":"ip_1"}',
+            "text-video-plan": b'{"text":"xx","template":"t","style":"s","voice":"v"}',
+            "text-video-avatar-import": b'{"image_upload_id":"img_11111111111111111111111111111111"}',
             "ip12-message": '{"project_id":"ip_1","message":"我的核心客户是本地餐饮老板","request_id":"turn-001"}'.encode(),
             "canvas-create": b'{"name":"Launch","prompt":"first idea"}',
             "canvas-ops": b'{"board_id":"cb_1","base_version":1,"op_id":"hqcli-abcdefghijkl","ops":[{"type":"node.patch","id":"n1","fields":{"x":120}}]}',
             "asset-tags": '{"kind":"image","key":"asset-1","tags":["客户案例"]}'.encode(),
             "asset-delete": b'{"kind":"video","keys":["v_1"]}',
+            "canvas-delete": b'{"board_id":"cb_1"}',
+            "video-compose-delete": b'{"project_id":"compose_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_revision":2}',
+            "digital-presenter-delete": b'{"board_id":"cb_1","project_id":"dp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","revision":3}',
+            "short-drama-create": '{"title":"新剧","synopsis":"一个八集短剧的故事","ratio":"9:16","target_duration":"15-30","shot_count":6,"request_id":"hqcli-sd-001"}'.encode(),
+            "short-drama-delete": b'{"project_id":"p_1","revision":1}',
+            "leads-delete": b'{"lead_ids":["0123456789abcdef"]}',
+            "digital-ip-create": '{"title":"新 IP"}'.encode(),
+            "digital-ip-update": '{"project_id":"p_1","revision":2,"title":"改名"}'.encode(),
+            "digital-ip-delete": b'{"project_id":"p_1","revision":2}',
             "inspiration-like": b'{"id":1001,"favorite":true}',
             "leads-crm-upsert": '{"lead_id":"0123456789abcdef","follow_status":"跟进中"}'.encode(),
             "video-compose-review": ('{"project_id":"compose_%s","expected_revision":2,'
@@ -477,6 +501,7 @@ class HqCliTests(unittest.TestCase):
             "inspiration-like": {"id": 1001, "favorite": True},
             "leads-crm-upsert": {"lead_id": "0123456789abcdef", "follow_status": "跟进中"},
             "asset-delete": {"kind": "image", "keys": ["img-1"]},
+            "ip12-delete": {"project_id": "ip_1"},
         }
         for identifier, payload in cases.items():
             with self.subTest(identifier=identifier), \
@@ -782,6 +807,8 @@ class HqCliTests(unittest.TestCase):
             (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":[]}'),
             (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":"v_1"}'),
             (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":["v_1","v_1"]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","id":9,"keys":["v_1"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["twitter"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"platforms":["douyin"],"channels_targets":["target"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["channels"]}'),
@@ -794,6 +821,31 @@ class HqCliTests(unittest.TestCase):
                 code, output, error = self.invoke(argv, raw)
                 self.assertIn(code, {cli.EXIT_USAGE, cli.EXIT_INPUT})
                 self.assertEqual("hq.error/v1", self.payload(error)["schema"])
+        request.assert_not_called()
+
+    def test_digital_ip_xor_inputs_and_text_video_talking_are_rejected_before_http(self):
+        self.authorize()
+        avatar = 123
+        cases = [
+            (["run", "digital-ip-text-generate", "--input", "@-"],
+             '{"text":"x","voice":"v"}'.encode()),
+            (["run", "digital-ip-text-generate", "--input", "@-"],
+             ('{"text":"x","voice":"v","avatar_id":1,"image_upload_id":"img_%s"}' % ("1" * 32)).encode()),
+            (["run", "digital-ip-audio-generate", "--input", "@-"],
+             b'{"avatar_id":1}'),
+            (["run", "digital-ip-audio-generate", "--input", "@-"],
+             ('{"avatar_id":1,"audio_file":"f","audio_upload_id":"aud_%s"}' % ("1" * 32)).encode()),
+            (["run", "text-video-generate", "--input", "@-"],
+             ('{"text":"x","template":"t","style":"s","voice":"v",'
+              '"talking_material":{"enabled":true,"plan_id":"talking_plan_%s","source_hash":"%s",'
+              '"ratio":0.3,"default_avatar_asset_id":"local_avatar_%s","scenes":[{"scene_id":"scene_01","enabled":false}]}}' % (
+                  "a" * 32, "b" * 64, "c" * 32)).encode()),
+        ]
+        with patch("hq_cli.client.request_json") as request:
+            for argv, raw in cases:
+                code, _, error = self.invoke(argv, raw)
+                self.assertEqual(cli.EXIT_INPUT, code)
+                self.assertEqual("input_error", self.payload(error)["error"])
         request.assert_not_called()
 
     def test_video_channel_contract_is_enforced_before_network(self):
