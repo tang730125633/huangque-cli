@@ -195,6 +195,8 @@ for identifier, name, description in (
     ("text-video-templates", "文案成片模板", "读取文案成片可用模板。"),
     ("text-video-styles", "文案成片样式", "读取文案成片可用样式。"),
     ("text-video-voices", "文案成片音色", "读取文案成片可用音色。"),
+    ("matrix-template-capability", "模板成片可用状态", "读取模板成片功能开关和生成服务状态。"),
+    ("matrix-template-templates", "模板成片模板", "读取模板成片可用视觉模板。"),
 ):
     CAPABILITIES[identifier] = _api(identifier, name, identifier, description, scope="assets:read")
 CAPABILITIES["pricing"] = _api(
@@ -238,6 +240,17 @@ CAPABILITIES["voice-clone-create"] = _api(
      "name": {"type": "string", "minLength": 1, "maxLength": 40},
      "audio_upload_id": {"type": "string", "minLength": 36, "maxLength": 36}},
     ["slot_id", "name", "audio_upload_id"], "assets:write", "write", True)
+CAPABILITIES["voice-clone-create"]["constraints"] = [
+    "slot_id must come from audio-slots and belong to the current account",
+    "audio_upload_id must come from audio-upload and belong to the current account",
+    "the server normalizes up to 60 seconds of clear speech before creating or replacing the cloned voice",
+    "for reliable cloning, use 30-60 seconds of continuous, clear, single-speaker speech; file duration alone does not guarantee enough effective speech",
+    "long silence, music, and noise do not count as effective speech",
+]
+CAPABILITIES["voice-clone-create"]["next_actions"] = [
+    "提交后只用 voice-clone-status 轮询原 slot_id，直到 ready 或 failed。",
+    "若返回有效语音太短，重新上传30至60秒连续、清晰、单人说话的样音，再用新的 audio_upload_id 提交。",
+]
 CAPABILITIES["voice-clone-status"] = _api(
     "voice-clone-status", "声音克隆状态", "voice-clone-status", "读取一个本人声音克隆槽位的处理状态。",
     {"slot_id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{1,87}$"}},
@@ -385,17 +398,21 @@ CAPABILITIES["video-upload"]["next_actions"] = [
     "把返回的 upload_id 写入电影化身或经典换装动作的 reference_video_upload_ids / person_video_upload_id。",
 ]
 CAPABILITIES["audio-upload"] = _upload(
-    "audio-upload", "上传本人口播音频样音",
-    "把一段本人 MP3、WAV、M4A、AAC 或 OGG 音频流式上传为本人短期私有 upload_id；不扣点，不返回公开素材地址。",
+    "audio-upload", "上传生成参考音频",
+    "把一个本地 MP3、WAV、M4A、AAC 或 OGG 流式上传为本人短期私有 upload_id；不扣点，不返回公开素材地址。",
     "assets:upload",
 )
 CAPABILITIES["audio-upload"]["file_input"] = {
     "argument": "--file", "path": "absolute", "maxBytes": 10 * 1024 * 1024,
-    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg"],
+    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/mp4", "audio/aac", "audio/ogg"],
     "accountActiveMaxFiles": 20, "accountActiveMaxBytes": 96 * 1024 * 1024,
 }
+CAPABILITIES["audio-upload"]["constraints"] = [
+    "audio must contain a readable stream no longer than 300 seconds",
+    "the upload is private to the current account; use result.expires_in as the authoritative lifetime",
+]
 CAPABILITIES["audio-upload"]["next_actions"] = [
-    "把返回的 upload_id 写入 voice-clone-create 的 audio_upload_id。",
+    "把返回的 result.upload_id 作为 audio_upload_id 写入 voice-clone-create 或 digital-ip-audio-generate。",
 ]
 ASSET_MARK_FIELDS = {
     "kind": {"type": "string", "enum": ["image", "audio", "video", "avatar", "copy", "collect", "leads", "breakdown"]},
@@ -793,6 +810,18 @@ TEXT_VIDEO_PLAN_FIELDS = {
 }
 TEXT_VIDEO_PLAN_FIELDS["ratio"] = {"type": "number", "minimum": 0.1, "maximum": 0.5}
 
+MATRIX_TEMPLATE_FIELDS = {
+    "top_text": {"type": "string", "minLength": 2, "maxLength": 60},
+    "bottom_text": {"type": "string", "minLength": 2, "maxLength": 80},
+    "template_id": {"type": "string", "minLength": 1, "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},
+    "font_family": {"type": "string", "maxLength": 80},
+}
+MATRIX_TEMPLATE_BATCH_FIELDS = {
+    **MATRIX_TEMPLATE_FIELDS,
+    "count": {"type": "integer", "minimum": 2, "maximum": 5},
+}
+
 for identifier, name, fields, required in (
     ("image-generate", "图片生成", IMAGE_FIELDS, ["prompt"]),
     ("video-generate", "视频生成", VIDEO_FIELDS, ["prompt"]),
@@ -801,6 +830,10 @@ for identifier, name, fields, required in (
     ("audio-generate", "音频生成", AUDIO_FIELDS, ["text"]),
     ("text-video-generate", "文案成片生成", TEXT_VIDEO_FIELDS,
      ["text", "template", "style", "voice"]),
+    ("matrix-template-generate", "模板成片生成", MATRIX_TEMPLATE_FIELDS,
+     ["top_text", "bottom_text", "template_id"]),
+    ("matrix-template-batch-generate", "模板成片批量生成", MATRIX_TEMPLATE_BATCH_FIELDS,
+     ["top_text", "bottom_text", "template_id", "count"]),
     ("digital-ip-text-generate", "数字IP单条文案生成", DIGITAL_IP_TEXT_FIELDS,
      ["text", "voice"]),
     ("digital-ip-audio-generate", "数字IP本人资产音频生成", DIGITAL_IP_AUDIO_FIELDS,
@@ -873,6 +906,23 @@ CAPABILITIES["text-video-generate"]["constraints"] = [
 ]
 CAPABILITIES["text-video-generate"]["next_actions"] = [
     "核对 scene_count 和 cost_breakdown 后，用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后仅使用 task 轮询。",
+]
+CAPABILITIES["matrix-template-generate"]["constraints"] = [
+    "template_id must be selected from matrix-template-templates",
+    "font_family is optional and must be selected from matrix-template-templates fonts",
+    "duration is calculated automatically and BGM is enabled by default",
+    "the first call only quotes the fixed template-video cost",
+]
+CAPABILITIES["matrix-template-generate"]["next_actions"] = [
+    "核对报价后，用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后仅使用 task 轮询。",
+]
+CAPABILITIES["matrix-template-batch-generate"]["constraints"] = [
+    "template_id and optional font_family must be selected from matrix-template-templates",
+    "count creates 2-5 independent jobs under one total quote and one confirmation",
+    "duration is calculated automatically and BGM is enabled by default",
+]
+CAPABILITIES["matrix-template-batch-generate"]["next_actions"] = [
+    "核对总价与 count 后，用完全相同的输入、quote_token 与 --confirm 提交；只轮询返回的 job_ids。",
 ]
 CAPABILITIES["text-video-avatar-import"] = _api(
     "text-video-avatar-import", "导入口播人物", "text-video-avatar-import",
@@ -961,7 +1011,7 @@ for identifier, website_modes in {
     "image": ["banana", "openai", "seedream", "xiaole"],
     "image-upload": ["banana", "openai", "seedream", "xiaole"],
     "video-upload": ["cinematic", "tryon"],
-    "audio-upload": ["tts"],
+    "audio-upload": ["tts", "digital_ip"],
     "image-generate": ["banana", "openai", "seedream", "xiaole"],
     "video": ["one_click", "digital_ip", "cinematic", "tryon", "grok", "sora", "minimax", "omni", "seedance"],
     "video-generate": ["grok", "sora", "minimax", "omni", "seedance"],
@@ -992,6 +1042,11 @@ for identifier, website_modes in {
     "text-video-plan": ["text_video"],
     "text-video-templates": ["text_video"], "text-video-styles": ["text_video"],
     "text-video-voices": ["text_video"],
+    "matrix-template-capability": ["matrix_template.single"],
+    "matrix-template": ["matrix_template.single"],
+    "matrix-template-templates": ["matrix_template.single"],
+    "matrix-template-generate": ["matrix_template.single"],
+    "matrix-template-batch-generate": ["matrix_template.batch"],
     "short-drama": ["live_action"],
     "short-drama-create": ["live_action"], "short-drama-delete": ["live_action"],
     "short-drama-projects": ["live_action"], "short-drama-project": ["live_action"],
@@ -1016,6 +1071,248 @@ for identifier, website_modes in {
     "recharge": ["recharge"], "bots": ["bots"],
 }.items():
     CAPABILITIES[identifier]["website_modes"] = website_modes
+
+
+_SITE_OPERATIONS = {
+    "inspiration": ["inspiration.browse", "inspiration.like", "inspiration.handoff"],
+    "leads": ["leads.keyword.search", "leads.crm.update"],
+    "collect": ["collect.content.comments", "collect.content.video", "collect.content.transcript", "collect.keyword.search"],
+    "banana": [
+        "image.banana.nb2.text", "image.banana.nb2.reference", "image.banana.pro.text", "image.banana.pro.reference",
+        "image.openai.text", "image.openai.reference", "image.openai.inpaint",
+        "image.seedream.std.text", "image.seedream.std.reference", "image.seedream.pro.text", "image.seedream.pro.reference",
+        "image.xiaole.text", "image.xiaole.reference", "image.prompt.optimize", "image.prompt.reverse",
+    ],
+    "video": [
+        "video.one_click.compose", "video.digital_ip.text.single", "video.digital_ip.text.batch", "video.digital_ip.audio",
+        "video.cinematic.motion", "video.cinematic.open", "video.tryon.fast", "video.tryon.classic",
+        "video.grok.text", "video.grok.image", "video.sora.text", "video.sora.image", "video.minimax.image",
+        "video.omni.text", "video.omni.image", "video.seedance.text", "video.seedance.image", "video.asset.import_h3",
+    ],
+    "audio": ["audio.tts.public", "audio.tts.personal"],
+    "script": [
+        "script.write.spoken", "script.write.story", "script.write.recommend",
+        "script.breakdown.scenes", "script.breakdown.reverse", "script.breakdown.local_image", "script.breakdown.local_video",
+        "script.output.video.story", "script.output.video.spoken", "script.output.video.recommend",
+        "script.output.remake.cinematic", "script.output.remake.grok", "script.output.remake.micro",
+        "script.output.image", "script.output.handoff",
+    ],
+    "text-video": ["text_video.topic", "text_video.fixed"],
+    "matrix-template": ["matrix_template.single", "matrix_template.batch"],
+    "short-drama": [
+        "short_drama.live_action.script_planning", "short_drama.live_action.character_reference",
+        "short_drama.live_action.shot_video", "short_drama.live_action.preview",
+        "short_drama.live_action.delivery", "short_drama.autodraft.review",
+    ],
+    "canvas": [
+        "canvas.agent.plan", "canvas.image.banana.nb2", "canvas.image.banana.pro", "canvas.image.openai",
+        "canvas.image.zelong", "canvas.video.grok", "canvas.video.micro", "canvas.short_drama.node",
+        "canvas.prompt.reverse", "canvas.local.edit",
+    ],
+    "assets": ["assets.audio.clone_vip", "assets.library.read", "assets.library.manage", "assets.voice.slot"],
+    "pricing": ["pricing.catalog"], "invite": ["invite.dashboard", "invite.poster"],
+    "tutorials": ["tutorials.playback"],
+    "settings": ["settings.profile", "settings.preferences", "settings.friends", "settings.points", "settings.security"],
+}
+_SITE_NAVIGATION = {
+    "inspiration": "inspiration", "leads": "leads", "collect": "collect", "banana": "image",
+    "video": "video", "audio": "audio", "script": "script", "text-video": "text-video",
+    "matrix-template": "matrix-template", "short-drama": "short-drama", "canvas": "canvas",
+    "assets": "assets-page", "pricing": "pricing-page", "invite": "invite",
+    "tutorials": "tutorials", "settings": "settings",
+}
+for _site_page, _site_operations in _SITE_OPERATIONS.items():
+    CAPABILITIES[_SITE_NAVIGATION[_site_page]]["website_operations"] = list(_site_operations)
+
+
+_AGENT_RESOURCES = {
+    "ip12-": "ip12_project", "digital-ip-project": "digital_ip_project",
+    "short-drama-": "short_drama_project", "video-compose-": "video_compose_project",
+    "digital-presenter-": "digital_presenter", "canvas-": "canvas",
+    "image-upload": "asset", "video-upload": "asset", "audio-upload": "asset", "asset": "asset", "assets": "asset",
+    "task": "task", "voices": "voice",
+    "audio-slots": "voice", "voice-clone-": "voice", "leads-crm": "lead",
+    "inspiration-": "inspiration", "text-video-": "text_video",
+}
+_AGENT_RESOURCE_OVERRIDES = {
+    "digital-ip-projects": "digital_ip_project",
+    "digital-ip-project": "digital_ip_project",
+    "digital-ip-report": "digital_ip_project",
+    "digital-ip-create": "digital_ip_project",
+    "digital-ip-update": "digital_ip_project",
+    "digital-ip-delete": "digital_ip_project",
+    "leads-crm": "lead",
+    "leads-crm-upsert": "lead",
+    "leads-delete": "lead",
+}
+_AGENT_OPERATIONS = {
+    "ip12-projects": "list", "ip12-project": "get", "ip12-report": "get",
+    "ip12-create": "create", "ip12-message": "update", "ip12-delete": "delete",
+    "digital-ip-projects": "list", "digital-ip-project": "get", "digital-ip-report": "get",
+    "short-drama-projects": "list", "short-drama-project": "get",
+    "short-drama-conversation": "get", "short-drama-preflight": "get",
+    "canvas-list": "list", "canvas-get": "get", "canvas-create": "create", "canvas-ops": "update",
+    "tasks": "list", "task": "get", "assets": "list", "voices": "list",
+    "asset-delete": "delete",
+    "canvas-delete": "delete", "video-compose-delete": "delete",
+    "digital-presenter-delete": "delete", "short-drama-create": "create",
+    "short-drama-delete": "delete", "leads-delete": "delete",
+    "digital-ip-create": "create", "digital-ip-update": "update", "digital-ip-delete": "delete",
+    "voice-clone-create": "create", "voice-clone-status": "get",
+    "video-avatars": "list", "audio-slots": "list", "leads-crm": "list",
+    "leads-crm-upsert": "update", "inspiration-catalog": "list",
+    "inspiration-likes": "list", "inspiration-like": "update",
+}
+_STANDARD_CRUD = ("list", "get", "create", "update", "delete")
+
+
+def _agent_resource(identifier):
+    if identifier in _AGENT_RESOURCE_OVERRIDES:
+        return _AGENT_RESOURCE_OVERRIDES[identifier]
+    for prefix, resource in _AGENT_RESOURCES.items():
+        if identifier == prefix or identifier.startswith(prefix):
+            return resource
+    return identifier.split("-", 1)[0].replace("_", "-")
+
+
+def _agent_operation(capability):
+    identifier = capability["id"]
+    if identifier in _AGENT_OPERATIONS:
+        return _AGENT_OPERATIONS[identifier]
+    if capability["kind"] == "navigation":
+        return "navigate"
+    if capability["kind"] == "upload":
+        return "create"
+    if capability["side_effect"] == "paid":
+        return "execute"
+    if capability["side_effect"] == "read":
+        return "list" if identifier.endswith(("s", "-catalog", "-templates", "-styles")) else "get"
+    if identifier.endswith(("-delete", "-remove")):
+        return "delete"
+    if identifier.endswith(("-create", "-import", "-plan")):
+        return "create"
+    if identifier.endswith(("-render", "-generate")):
+        return "execute"
+    return "update"
+
+
+def _agent_input_source(name):
+    if name == "job_id":
+        return "从异步创建能力的 result.job_id 复制；之后只调用 task，不重新提交创建。"
+    if name in {"project_id", "board_id", "source_asset_id", "video_asset_id", "audio_asset_id"}:
+        return "先调用同资源的 list/get 能力，从本人可访问结果复制 ID。"
+    if name.endswith("upload_id") or name.endswith("upload_ids"):
+        family = {
+            "audio_upload_id": "audio",
+            "clothes_upload_id": "image",
+            "image_upload_id": "image",
+            "person_image_upload_id": "image",
+            "person_video_upload_id": "video",
+            "reference_video_upload_ids": "video",
+        }.get(name)
+        if family is None:
+            family = "video" if "video" in name else "image"
+        return "先调用 %s-upload，使用其本人私有 upload_id。" % family
+    if name in {"avatar_id", "avatar_ids", "avatars"}:
+        return "先调用 video-avatars，从 ready 形象复制 avatar_id。"
+    if name == "slot_id":
+        return "先调用 audio-slots，从当前账号可用槽位复制 slot_id。"
+    if name in {"voice", "voice_key"}:
+        return "先调用 voices，从可试听且 ready 的声音复制 voice_key。"
+    if name in {"revision", "expected_revision", "expected_version"}:
+        return "写入前重新读取目标，使用最新 revision/version；冲突后不得覆盖。"
+    if name == "request_id":
+        return "为新操作生成唯一 ID；响应不确定时必须复用同一 ID。"
+    return "由用户明确提供，并按 input_schema 校验。"
+
+
+def _required_input_names(schema):
+    names = []
+    if isinstance(schema, dict):
+        for name in schema.get("required") or []:
+            if name not in names:
+                names.append(name)
+        for key in ("oneOf", "anyOf", "allOf"):
+            for child in schema.get(key) or []:
+                for name in _required_input_names(child):
+                    if name not in names:
+                        names.append(name)
+    return names
+
+
+def _attach_agent_guidance():
+    resource_operations = {}
+    for capability in CAPABILITIES.values():
+        resource = _agent_resource(capability["id"])
+        operation = _agent_operation(capability)
+        resource_operations.setdefault(resource, {}).setdefault(operation, []).append(capability["id"])
+        capability["agent"] = {"resource": resource, "operation": operation}
+    for capability in CAPABILITIES.values():
+        agent = capability["agent"]
+        operation = agent["operation"]
+        required = _required_input_names(capability["input_schema"])
+        preconditions = []
+        if capability["requires_auth"]:
+            preconditions.append("先运行 hq status；未授权时运行 hq login。")
+        if capability.get("required_scope"):
+            preconditions.append("授权必须包含 %s。" % capability["required_scope"])
+        if capability["confirmation_required"]:
+            preconditions.append("执行外部写入前必须显式传 --confirm。")
+        if capability["side_effect"] == "paid":
+            workflow = [
+                "先用相同输入且不带 --confirm 获取服务器报价。",
+                "向用户展示 cost、points 与具体扣点，得到明确同意。",
+                "仅一次复用完全相同输入并传 --confirm --quote-token。",
+                "拿到 job_id 后只调用 task 直到终态，并验证可用成品与账务。",
+            ]
+        else:
+            workflow = ["运行 hq describe %s --json。" % capability["id"]]
+            workflow.append("按 input_schema 运行一次；不要添加未声明字段。")
+            if capability["confirmation_required"]:
+                workflow.append("在执行写入前向用户说明影响并传 --confirm。")
+        recovery = ["失败后先读取目标的最新状态，不盲目重复写入。"]
+        if capability["side_effect"] == "paid":
+            recovery = ["响应不确定时只查询原 job_id/request_id；禁止重新提交付费创建。"]
+        elif operation in {"update", "delete"}:
+            recovery.append("冲突或超时后重新 list/get；确认状态未变化前不要重试。")
+        agent.update({
+            "when_to_use": capability["description"],
+            "preconditions": preconditions,
+            "required_inputs": {name: _agent_input_source(name) for name in required},
+            "workflow": workflow,
+            "success_evidence": [
+                "退出码为 0，且 JSON schema、capability 与目标一致。",
+                "结果包含可复查的资源 ID、revision、job_id 或最终成品。",
+            ],
+            "recovery": recovery,
+            "website_access": "navigate" if capability["kind"] == "navigation" else "direct",
+            "website_operations": list(capability.get("website_operations") or []),
+            "resource_operations": resource_operations[agent["resource"]],
+            "missing_crud": [name for name in _STANDARD_CRUD if name not in resource_operations[agent["resource"]]],
+        })
+
+
+_attach_agent_guidance()
+
+CAPABILITIES["voice-clone-create"]["agent"]["workflow"].append(
+    "提交成功后只调用 voice-clone-status 查询原 slot_id；不要重复创建。"
+)
+CAPABILITIES["voice-clone-create"]["agent"]["recovery"].append(
+    "若状态为 failed 且提示有效语音太短，上传新的30至60秒连续清晰单人语音，再用新的 audio_upload_id 发起新操作。"
+)
+CAPABILITIES["matrix-template-batch-generate"]["agent"]["workflow"][-1] = (
+    "保存返回的全部 job_ids，之后只调用 task 查询这些原任务直到终态，并逐条验证成品与账务。"
+)
+CAPABILITIES["matrix-template-batch-generate"]["agent"]["recovery"] = [
+    "部分成功或响应不确定时，先保留错误详情中的 jobs/job_ids；不要创建新批次。",
+    "仅当返回 batch_result_pending 并明确要求恢复时，才用完全相同输入、原 quote_token 和 --confirm 重放一次。",
+]
+CAPABILITIES["leads-delete"]["agent"]["workflow"].insert(
+    1, "先调用 leads-crm 读取并核对要永久删除的本人线索，再传这些 lead_ids 和 --confirm。"
+)
+
+
+
 
 
 def capability_list():
