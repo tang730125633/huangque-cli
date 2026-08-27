@@ -20,6 +20,16 @@ class McpServerTests(unittest.TestCase):
         self.assertIn("quote_token", paid["properties"])
         upload = by_name["hq_image_upload"]["inputSchema"]
         self.assertEqual({"file", "confirm"}, set(upload["required"]))
+        single = by_name["hq_matrix_template_generate"]["inputSchema"]
+        self.assertIn("font_family", single["properties"])
+        self.assertIn("quote_token", single["properties"])
+        batch = by_name["hq_matrix_template_batch_generate"]["inputSchema"]
+        self.assertEqual((2, 5), (
+            batch["properties"]["count"]["minimum"],
+            batch["properties"]["count"]["maximum"],
+        ))
+        self.assertIn("count", batch["required"])
+        self.assertTrue(by_name["hq_asset_delete"]["annotations"]["destructiveHint"])
 
     def test_paid_call_reuses_cli_quote_and_confirmation_arguments(self):
         calls = []
@@ -37,6 +47,29 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual({"url": "https://www.bilibili.com/video/BV1xx411c7mD"}, calls[0][1])
         self.assertEqual([
             "run", "collect-content", "--input", "@-", "--confirm", "--quote-token", "q.test",
+        ], calls[0][0])
+
+    def test_template_batch_passes_one_confirmation_to_the_fixed_cli_action(self):
+        calls = []
+
+        def runner(arguments, stdin_text):
+            calls.append((arguments, json.loads(stdin_text)))
+            return 0, {"schema": "hq.run/v1", "result": {"job_ids": [1, 2]}}
+
+        payload = {
+            "top_text": "顶部标题", "bottom_text": "底部行动文案",
+            "template_id": "poster-split", "font_family": "Noto Sans SC",
+            "count": 2, "confirm": True, "quote_token": "q.batch",
+        }
+        result = mcp_server.call_tool("hq_matrix_template_batch_generate", payload, runner=runner)
+        self.assertNotIn("isError", result)
+        self.assertEqual({
+            "top_text": "顶部标题", "bottom_text": "底部行动文案",
+            "template_id": "poster-split", "font_family": "Noto Sans SC", "count": 2,
+        }, calls[0][1])
+        self.assertEqual([
+            "run", "matrix-template-batch-generate", "--input", "@-",
+            "--confirm", "--quote-token", "q.batch",
         ], calls[0][0])
 
     def test_write_and_logout_are_blocked_without_confirmation(self):
@@ -65,7 +98,7 @@ class McpServerTests(unittest.TestCase):
 
         def runner(arguments, stdin_text):
             self.assertEqual(["version"], arguments)
-            return 0, {"schema": "hq.version/v1", "cli_version": "0.11.0"}
+            return 0, {"schema": "hq.version/v1", "cli_version": "0.12.0"}
 
         self.assertEqual(0, mcp_server.serve(source, output, runner=runner))
         responses = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -75,6 +108,16 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual("2026-07-28", responses[1]["result"]["supportedVersions"][0])
         self.assertEqual(len(CAPABILITIES) + len(mcp_server.CONTROL_TOOLS), len(responses[2]["result"]["tools"]))
         self.assertEqual("hq.version/v1", responses[3]["result"]["structuredContent"]["schema"])
+
+    def test_current_protocol_is_not_downgraded(self):
+        source = io.StringIO(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": mcp_server.PROTOCOL_VERSION},
+        }) + "\n")
+        output = io.StringIO()
+        self.assertEqual(0, mcp_server.serve(source, output))
+        response = json.loads(output.getvalue())
+        self.assertEqual(mcp_server.PROTOCOL_VERSION, response["result"]["protocolVersion"])
 
 
 if __name__ == "__main__":

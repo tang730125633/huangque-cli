@@ -13,6 +13,7 @@ from .catalog import CAPABILITIES, ENVIRONMENTS
 
 PROTOCOL_VERSION = "2026-07-28"
 LEGACY_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18")
+SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, *LEGACY_PROTOCOL_VERSIONS)
 CONTROL_TOOLS = {
     "hq_cli_help": {
         "description": "Show the fixed Huangque CLI command catalog.",
@@ -151,6 +152,7 @@ def list_tools():
         })
     for capability in CAPABILITIES.values():
         side_effect = capability["side_effect"]
+        destructive = capability.get("agent", {}).get("operation") == "delete"
         confirmation = " Explicit confirmation is required." if capability["confirmation_required"] else ""
         tools.append({
             "name": capability_tool_name(capability["id"]),
@@ -159,7 +161,7 @@ def list_tools():
             "outputSchema": capability["output_schema"],
             "annotations": {
                 "readOnlyHint": side_effect in {"read", "navigation"},
-                "destructiveHint": False,
+                "destructiveHint": destructive,
                 "idempotentHint": side_effect in {"read", "navigation"},
                 "openWorldHint": True,
             },
@@ -284,7 +286,7 @@ def _handle(request, runner):
         return None
     if method == "initialize":
         requested = (request.get("params") or {}).get("protocolVersion")
-        negotiated = requested if requested in LEGACY_PROTOCOL_VERSIONS else LEGACY_PROTOCOL_VERSIONS[0]
+        negotiated = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
         return {
             "protocolVersion": negotiated,
             "capabilities": {"tools": {"listChanged": False}},
@@ -297,7 +299,7 @@ def _handle(request, runner):
     if method == "server/discover":
         return {
             "resultType": "complete",
-            "supportedVersions": [PROTOCOL_VERSION, *LEGACY_PROTOCOL_VERSIONS],
+            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "capabilities": {"tools": {"listChanged": False}},
             "_meta": {
                 "io.modelcontextprotocol/serverInfo": {"name": "huangque", "version": __version__},

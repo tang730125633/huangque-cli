@@ -56,14 +56,19 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash.ToLowerInvariant()
           $installer = Join-Path $env:RUNNER_TEMP "install.ps1"
           $source = [IO.File]::ReadAllText((Resolve-Path .\install.ps1))
-          $source = [regex]::Replace($source, '(?m)^\$WheelSha256 = "[0-9a-f]{64}"\r?$', '$WheelSha256 = "' + $hash + '"')
+          $pinned = ([regex]::Match($source, '\$WheelSha256 = "([0-9a-f]{64})"')).Groups[1].Value
+          if (-not $pinned) { throw "install.ps1 does not pin a wheel sha256" }
+          $source = $source.Replace($pinned, $hash)
           [IO.File]::WriteAllText($installer, $source, [Text.ASCIIEncoding]::new())
           $unicode = ([string][char]0x9EC4) + ([string][char]0x96C0)
           $root = Join-Path $env:RUNNER_TEMP ($unicode + " CLI Test")
           & $installer -WheelPath $wheel -InstallRoot $root -NoPathUpdate
           $hq = Join-Path $root "bin\hq.cmd"
           $result = & $hq version --json | ConvertFrom-Json
-          if ($result.cli_version -ne "0.11.0") { throw "unexpected CLI version" }
+          $init = [IO.File]::ReadAllText((Resolve-Path .\src\hq_cli\__init__.py))
+          $expected = ([regex]::Match($init, '__version__ = "([^"]+)"')).Groups[1].Value
+          if (-not $expected) { throw "cannot read CLI version" }
+          if ($result.cli_version -ne $expected) { throw "unexpected CLI version" }
           [IO.File]::AppendAllText($env:GITHUB_ENV, "HQ_TEST_ROOT=$root`n", [Text.UTF8Encoding]::new($false))
       - name: Run through cmd.exe
         shell: cmd

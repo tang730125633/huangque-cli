@@ -42,7 +42,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.11.0", self.payload(output)["cli_version"])
+        self.assertEqual("0.12.0", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -75,15 +75,18 @@ class HqCliTests(unittest.TestCase):
         _, output, _ = self.invoke(["capabilities"])
         by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
         expected = {
-            "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-report", "ip12-message",
+            "account", "channels", "ip12-projects", "ip12-project", "ip12-create", "ip12-report", "ip12-message", "ip12-delete",
             "prompt-optimize", "canvas-list", "canvas-get", "canvas-create", "canvas-agent-plan", "canvas-ops", "tasks", "task",
-            "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags",
-            "image-generate", "video-generate", "audio-generate",
+            "assets", "voices", "image-upload", "video-upload", "asset-favorite", "asset-tags", "asset-delete",
+            "image-generate", "video-generate", "video-lipsync", "audio-generate",
             "digital-ip-text-generate", "digital-ip-audio-generate", "digital-ip-batch-generate",
             "cinematic-open-generate", "cinematic-motion-generate",
             "tryon-fast-generate", "tryon-classic-generate",
             "digital-ip-projects", "digital-ip-project", "digital-ip-report",
-            "text-video-capability", "text-video-templates", "text-video-styles", "text-video-voices", "pricing",
+            "text-video-capability", "text-video-templates", "text-video-styles", "text-video-voices",
+            "text-video-avatar-import", "text-video-plan", "text-video-generate", "pricing",
+            "matrix-template-capability", "matrix-template-templates", "matrix-template-generate",
+            "matrix-template-batch-generate",
             "inspiration-catalog", "inspiration-likes", "inspiration-like",
             "collect-content", "collect-video", "collect-transcript", "collect-search", "leads-generate",
             "leads-crm", "leads-crm-upsert", "video-avatars", "audio-slots",
@@ -92,6 +95,43 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(expected <= set(by_id))
         self.assertTrue(all(by_id[item]["availability"] == "available" for item in expected))
         self.assertTrue(all(by_id[item]["runnable"] for item in expected))
+
+    def test_every_capability_teaches_an_agent_how_to_use_and_recover_it(self):
+        _, output, _ = self.invoke(["capabilities"])
+        items = self.payload(output)["capabilities"]
+        self.assertGreater(len(items), 80)
+        for capability in items:
+            agent = capability["agent"]
+            self.assertIn(agent["operation"], {
+                "navigate", "list", "get", "create", "update", "delete", "execute",
+            })
+            self.assertTrue(agent["resource"])
+            self.assertEqual(capability["description"], agent["when_to_use"])
+            self.assertTrue(agent["workflow"])
+            self.assertTrue(agent["success_evidence"])
+            self.assertTrue(agent["recovery"])
+            self.assertEqual(
+                set(capability["input_schema"].get("required") or []),
+                set(agent["required_inputs"]),
+            )
+
+    def test_ip12_resource_has_complete_crud_guidance(self):
+        _, output, _ = self.invoke(["capabilities"])
+        by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
+        operations = by_id["ip12-project"]["agent"]["resource_operations"]
+        self.assertEqual({
+            "list": ["ip12-projects"], "get": ["ip12-project", "ip12-report"],
+            "create": ["ip12-create"], "update": ["ip12-message"],
+            "delete": ["ip12-delete"],
+        }, operations)
+        self.assertEqual([], by_id["ip12-delete"]["agent"]["missing_crud"])
+        self.assertTrue(by_id["ip12-delete"]["confirmation_required"])
+
+        asset = by_id["asset-delete"]["agent"]
+        self.assertEqual("delete", asset["operation"])
+        self.assertEqual("asset", asset["resource"])
+        self.assertIn("asset-delete", asset["resource_operations"]["delete"])
+        self.assertTrue(by_id["asset-delete"]["confirmation_required"])
         self.assertEqual("server_quote", by_id["image-generate"]["cost"]["kind"])
         self.assertEqual("hq_device_authorization", by_id["ip12-projects"]["target_auth"])
         self.assertEqual("assets:upload", by_id["image-upload"]["required_scope"])
@@ -102,10 +142,40 @@ class HqCliTests(unittest.TestCase):
             ["video/mp4", "video/quicktime", "video/webm"],
             by_id["video-upload"]["file_input"]["mimeTypes"],
         )
+        self.assertEqual("assets:upload", by_id["audio-upload"]["required_scope"])
+        self.assertEqual(10 * 1024 * 1024, by_id["audio-upload"]["file_input"]["maxBytes"])
+        self.assertEqual(
+            ["audio/mpeg", "audio/wav", "audio/mp4", "audio/aac", "audio/ogg"],
+            by_id["audio-upload"]["file_input"]["mimeTypes"],
+        )
+        self.assertIn("audio-upload", by_id["voice-clone-create"]["agent"]["required_inputs"]["audio_upload_id"])
+        self.assertIn("audio-slots", by_id["voice-clone-create"]["agent"]["required_inputs"]["slot_id"])
+        self.assertTrue(any(
+            "30-60 seconds" in item
+            for item in by_id["voice-clone-create"]["constraints"]
+        ))
+        self.assertTrue(any(
+            "silence" in item
+            for item in by_id["voice-clone-create"]["constraints"]
+        ))
+        self.assertTrue(any(
+            "voice-clone-status" in item
+            for item in by_id["voice-clone-create"]["agent"]["workflow"]
+        ))
+        self.assertTrue(any(
+            "有效语音太短" in item
+            for item in by_id["voice-clone-create"]["agent"]["recovery"]
+        ))
         self.assertEqual("server_quote", by_id["canvas-agent-plan"]["cost"]["kind"])
         self.assertEqual("canvas:edit", by_id["canvas-ops"]["required_scope"])
         self.assertEqual(12, by_id["canvas-ops"]["input_schema"]["properties"]["ops"]["maxItems"])
         self.assertIn("minimax", by_id["video-generate"]["input_schema"]["properties"]["channel"]["enum"])
+        self.assertIn("2k", by_id["video-generate"]["input_schema"]["properties"]["resolution"]["enum"])
+        minimax_rule = next(
+            rule for rule in by_id["video-generate"]["input_schema"]["allOf"]
+            if rule.get("if", {}).get("properties", {}).get("channel", {}).get("const") == "minimax"
+        )
+        self.assertEqual(["2k"], minimax_rule["then"]["properties"]["resolution"]["enum"])
         self.assertIn("banana", by_id["image-generate"]["input_schema"]["properties"]["provider"]["enum"])
         self.assertEqual(["nb2", "pro"], by_id["image-generate"]["input_schema"]["properties"]["model"]["enum"])
         self.assertIn("21:9", by_id["image-generate"]["input_schema"]["properties"]["ratio"]["enum"])
@@ -114,9 +184,58 @@ class HqCliTests(unittest.TestCase):
         self.assertIn("sora-2-pro", by_id["video-generate"]["input_schema"]["properties"]["model"]["enum"])
         self.assertEqual([4, 8, 12], by_id["video-generate"]["input_schema"]["properties"]["seconds"]["enum"])
         self.assertEqual("server_quote", by_id["digital-ip-text-generate"]["cost"]["kind"])
+        self.assertEqual("server_quote", by_id["text-video-generate"]["cost"]["kind"])
+        self.assertEqual("server_quote", by_id["matrix-template-generate"]["cost"]["kind"])
+        self.assertEqual("server_quote", by_id["matrix-template-batch-generate"]["cost"]["kind"])
+        self.assertEqual(80, by_id["matrix-template-generate"]["input_schema"]
+                         ["properties"]["font_family"]["maxLength"])
         self.assertEqual(
-            ["avatar_id", "audio_file"],
-            by_id["digital-ip-audio-generate"]["input_schema"]["required"],
+            ["top_text", "bottom_text", "template_id"],
+            by_id["matrix-template-generate"]["input_schema"]["required"],
+        )
+        self.assertEqual(
+            ["top_text", "bottom_text", "template_id", "count"],
+            by_id["matrix-template-batch-generate"]["input_schema"]["required"],
+        )
+        self.assertEqual((2, 5), (
+            by_id["matrix-template-batch-generate"]["input_schema"]
+                 ["properties"]["count"]["minimum"],
+            by_id["matrix-template-batch-generate"]["input_schema"]
+                 ["properties"]["count"]["maximum"],
+        ))
+        self.assertTrue(any(
+            "全部 job_ids" in item
+            for item in by_id["matrix-template-batch-generate"]["agent"]["workflow"]
+        ))
+        self.assertTrue(any(
+            "原 quote_token" in item
+            for item in by_id["matrix-template-batch-generate"]["agent"]["recovery"]
+        ))
+        self.assertEqual(
+            ["text", "template", "style", "voice"],
+            by_id["text-video-generate"]["input_schema"]["required"],
+        )
+        self.assertEqual(
+            ["generate", "fixed"],
+            by_id["text-video-generate"]["input_schema"]["properties"]["mode"]["enum"],
+        )
+        self.assertEqual("assets:upload", by_id["text-video-avatar-import"]["required_scope"])
+        self.assertEqual("generation:quote", by_id["text-video-plan"]["required_scope"])
+        self.assertTrue(by_id["text-video-avatar-import"]["confirmation_required"])
+        self.assertTrue(by_id["text-video-plan"]["confirmation_required"])
+        self.assertEqual(
+            ["video_asset_id", "audio_asset_id"],
+            by_id["video-lipsync"]["input_schema"]["required"],
+        )
+        self.assertEqual(
+            ["speed", "precision"],
+            by_id["video-lipsync"]["input_schema"]["properties"]["quality"]["enum"],
+        )
+        self.assertEqual([], by_id["digital-ip-audio-generate"]["input_schema"]["required"])
+        self.assertEqual(4, len(by_id["digital-ip-audio-generate"]["input_schema"]["oneOf"]))
+        self.assertEqual(
+            [{"required": ["avatar_id"]}, {"required": ["image_upload_id"]}],
+            by_id["digital-ip-text-generate"]["input_schema"]["oneOf"],
         )
         self.assertEqual(
             500,
@@ -147,22 +266,6 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(re.match(collect_url["pattern"], "https://xiaohongshu.com:443/explore/123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://douyin.com:8080/video"))
         self.assertTrue(re.match(collect_url["pattern"], "https://www.xiaohongshu.com/explore/123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/Abc123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com:443/sph/Abc123"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://www.bilibili.com/video/BV1EbdbBHEPa"))
-        self.assertTrue(re.match(collect_url["pattern"], "https://b23.tv/keSUqLz"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://b23.tv.evil.example/keSUqLz"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://mp.weixin.qq.com/s/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "http://weixin.qq.com/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph//Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/../Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/sphx/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com/not-sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://evil.weixin.qq.com/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:80/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://weixin.qq.com:444/sph/Abc123"))
-        self.assertFalse(re.match(collect_url["pattern"], "https://%75:%70@weixin.qq.com/sph/Abc123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://example.com/video"))
         search = by_id["collect-search"]["input_schema"]
         self.assertEqual(["douyin", "xhs"], search["properties"]["platform"]["enum"])
@@ -180,6 +283,7 @@ class HqCliTests(unittest.TestCase):
         by_id = {item["id"]: item for item in self.payload(output)["capabilities"]}
         navigation = {
             "text-video": "/workbench/text-video", "short-drama": "/workbench/short-drama",
+            "matrix-template": "/workbench/matrix-template.html",
             "pricing-page": "/workbench/pricing", "invite": "/workbench/invite",
             "recharge": "/workbench/recharge", "bots": "/workbench/bots",
         }
@@ -194,6 +298,8 @@ class HqCliTests(unittest.TestCase):
             "digital-ip-report": "ip12:read", "text-video-capability": "assets:read",
             "text-video-templates": "assets:read", "text-video-styles": "assets:read",
             "text-video-voices": "assets:read", "pricing": "profile:read",
+            "matrix-template-capability": "assets:read",
+            "matrix-template-templates": "assets:read",
             "inspiration-catalog": "inspiration:read", "inspiration-likes": "inspiration:read",
             "leads-crm": "leads:read", "video-avatars": "assets:read", "audio-slots": "assets:read",
             "short-drama-projects": "short-drama:read", "short-drama-project": "short-drama:read",
@@ -216,8 +322,15 @@ class HqCliTests(unittest.TestCase):
             "tryon-fast-generate": {"tryon"},
             "tryon-classic-generate": {"tryon"},
             "video-upload": {"cinematic", "tryon"},
+            "audio-upload": {"tts", "digital_ip"},
             "digital-presenter-capability": {"digitalPresenter"},
-            "text-video-capability": {"text_video"}, "digital-ip-projects": {"digital_ip"},
+            "text-video-capability": {"text_video"}, "text-video-generate": {"text_video"},
+            "text-video-avatar-import": {"text_video"}, "text-video-plan": {"text_video"},
+            "matrix-template-capability": {"matrix_template.single"},
+            "matrix-template-templates": {"matrix_template.single"},
+            "matrix-template-generate": {"matrix_template.single"},
+            "matrix-template-batch-generate": {"matrix_template.batch"},
+            "digital-ip-projects": {"digital_ip"},
             "pricing": {"pricing.catalog"},
             "inspiration-catalog": {"inspiration.browse"}, "inspiration-like": {"inspiration.like"},
             "collect": {"collect.content.comments", "collect.content.video", "collect.content.transcript", "collect.keyword.search"},
@@ -302,6 +415,7 @@ class HqCliTests(unittest.TestCase):
             "digital-ip-report": {"project_id": "project_1"},
             "text-video-capability": {}, "text-video-templates": {},
             "text-video-styles": {}, "text-video-voices": {}, "pricing": {},
+            "matrix-template-capability": {}, "matrix-template-templates": {},
             "inspiration-catalog": {}, "inspiration-likes": {},
             "leads-crm": {"lead_ids": ["a" * 16]}, "video-avatars": {"limit": 20}, "audio-slots": {},
             "short-drama-projects": {"page": 1, "page_size": 20},
@@ -359,6 +473,10 @@ class HqCliTests(unittest.TestCase):
             "digital-ip-audio-generate": {
                 "avatar_id": 17, "audio_file": "audio/mine.mp3", "ratio": "9:16",
             },
+            "digital-ip-text-generate": {
+                "image_upload_id": "img_" + "d" * 32, "text": "临时人物照片口播",
+                "voice": "S_public", "ratio": "9:16",
+            },
             "digital-ip-batch-generate": {
                 "avatars": [{"avatar_id": 17, "label": "主讲人"}, {"avatar_id": 18}],
                 "text": "欢迎来到黄雀", "voice": "S_public", "ratio": "9:16",
@@ -383,7 +501,7 @@ class HqCliTests(unittest.TestCase):
             },
             "collect-content": {"url": "https://v.douyin.com/abc123/"},
             "collect-video": {"url": "https://www.xiaohongshu.com/explore/123"},
-            "collect-transcript": {"url": "https://weixin.qq.com/sph/Abc123"},
+            "collect-transcript": {"url": "https://xhslink.com/a1b2c3"},
             "collect-search": {"platform": "douyin", "keyword": "AI 创业"},
             "leads-generate": {
                 "keyword": "AI 获客", "platforms": ["douyin", "xhs"],
@@ -464,6 +582,8 @@ class HqCliTests(unittest.TestCase):
             "video-compose-review": ('{"project_id":"compose_%s","expected_revision":2,'
                                        '"decisions":{"candidate_%s":"remove"}}' % ("a" * 32, "b" * 16)).encode(),
             "digital-presenter-create": b'{"board_id":"cb_1","request_id":"hqcli-dp-001"}',
+            "text-video-avatar-import": ('{"image_upload_id":"img_%s"}' % ("a" * 32)).encode(),
+            "text-video-plan": b'{"text":"AI training","template":"1080x1920/image_default.html","style":"realistic_commercial","voice":"public:zh-CN-YunjianNeural"}',
         }
         with patch("hq_cli.client.request_json") as request:
             for capability, raw in inputs.items():
@@ -551,6 +671,221 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("q.abc", second.kwargs["body"]["quote_token"])
         self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
 
+    def test_text_video_generation_exposes_quote_breakdown_and_confirms_same_input(self):
+        self.authorize()
+        value = {
+            "text": "AI 培训如何提升团队效率",
+            "template": "1080x1920/image_default.html",
+            "mode": "fixed", "style": "realistic_commercial",
+            "voice": "public:zh-CN-YunjianNeural", "speech_rate": 1.0,
+        }
+        raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        quote = {
+            "quote_token": "q.text-video", "kind": "script_to_video", "cost": 70,
+            "scene_count": 3, "cost_breakdown": {"scene_count": 3, "total": 70},
+            "expires_in": 300, "confirmation_required": True,
+        }
+        with patch("hq_cli.client.request_json", side_effect=[
+                (200, quote), (200, {"job_id": 91, "cost": 70, "points_left": 30})]) as request:
+            code, output, error = self.invoke(
+                ["run", "text-video-generate", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            self.assertEqual(3, self.payload(output)["result"]["scene_count"])
+            code, output, error = self.invoke([
+                "run", "text-video-generate", "--input", "@-", "--confirm",
+                "--quote-token", "q.text-video",
+            ], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual(91, self.payload(output)["result"]["job_id"])
+        first, second = request.call_args_list
+        self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
+        self.assertEqual("q.text-video", second.kwargs["body"]["quote_token"])
+
+    def test_matrix_template_quotes_confirms_and_reuses_exact_input(self):
+        self.authorize()
+        value = {
+            "top_text": "真正拉开差距的不是工具",
+            "bottom_text": "评论区留下关键词领取方案",
+            "template_id": "native-bold", "font_family": "AaHouDiHei",
+        }
+        raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        quote = {
+            "quote_token": "q.matrix", "kind": "matrix_template_video",
+            "cost": 5, "points": 100, "expires_in": 300,
+            "confirmation_required": True,
+        }
+        with patch("hq_cli.client.request_json", side_effect=[
+                (200, quote), (200, {"job_id": 92, "cost": 5, "points_left": 95})]) as request:
+            code, output, error = self.invoke(
+                ["run", "matrix-template-generate", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            self.assertEqual(5, self.payload(output)["result"]["cost"])
+            code, output, error = self.invoke([
+                "run", "matrix-template-generate", "--input", "@-", "--confirm",
+                "--quote-token", "q.matrix",
+            ], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual(92, self.payload(output)["result"]["job_id"])
+        first, second = request.call_args_list
+        self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
+        self.assertEqual("q.matrix", second.kwargs["body"]["quote_token"])
+
+    def test_matrix_template_batch_quotes_and_confirms_exact_count(self):
+        self.authorize()
+        value = {
+            "top_text": "批量模板成片标题",
+            "bottom_text": "评论区领取完整方案",
+            "template_id": "native-bold", "font_family": "AaHouDiHei", "count": 3,
+        }
+        raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        quote = {
+            "quote_token": "q.matrix.batch", "kind": "matrix_template_video_batch",
+            "cost": 15, "cost_per_job": 5, "count": 3, "points": 100,
+            "expires_in": 300, "confirmation_required": True,
+        }
+        accepted = {
+            "job_ids": [101, 102, 103], "submitted_count": 3,
+            "failed_count": 0, "cost": 15, "points_left": 85,
+        }
+        with patch("hq_cli.client.request_json", side_effect=[
+                (200, quote), (200, accepted)]) as request:
+            code, output, error = self.invoke(
+                ["run", "matrix-template-batch-generate", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            self.assertEqual((15, 3), (
+                self.payload(output)["result"]["cost"],
+                self.payload(output)["result"]["count"],
+            ))
+            code, output, error = self.invoke([
+                "run", "matrix-template-batch-generate", "--input", "@-", "--confirm",
+                "--quote-token", "q.matrix.batch",
+            ], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual([101, 102, 103], self.payload(output)["result"]["job_ids"])
+        first, second = request.call_args_list
+        self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
+        self.assertEqual("q.matrix.batch", second.kwargs["body"]["quote_token"])
+
+    def test_matrix_template_batch_pending_error_preserves_accepted_jobs(self):
+        self.authorize()
+        value = {
+            "top_text": "批量结果待确认",
+            "bottom_text": "保留已经受理的任务",
+            "template_id": "full-overlay-bold", "count": 3,
+        }
+        raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        payload = {
+            "detail": "批量提交结果待确认，请复用原 quote_token 重试",
+            "code": "batch_result_pending",
+            "jobs": [{"index": 1, "job_id": 501, "cost": 5}],
+            "failures": [{"index": 2, "code": "result_unknown"}],
+            "next_index": 2,
+        }
+        with patch("hq_cli.client.request_json", return_value=(502, payload)):
+            code, _, error = self.invoke([
+                "run", "matrix-template-batch-generate", "--input", "@-", "--confirm",
+                "--quote-token", "q.matrix.batch",
+            ], raw)
+        result = self.payload(error)
+        self.assertEqual(cli.EXIT_API, code)
+        self.assertEqual("batch_result_pending", result["error"])
+        self.assertEqual(501, result["details"]["jobs"][0]["job_id"])
+        self.assertEqual(2, result["details"]["next_index"])
+
+    def test_matrix_template_rejects_unknown_fields_and_invalid_template_id(self):
+        self.authorize()
+        base = {
+            "top_text": "有效标题", "bottom_text": "有效行动文案",
+            "template_id": "native-bold",
+        }
+        for payload in (
+            dict(base, duration=8),
+            dict(base, bgm=False),
+            dict(base, template_id="../bad"),
+            dict(base, font_family="x" * 81),
+        ):
+            with self.subTest(payload=payload), patch("hq_cli.client.request_json") as request:
+                code, _, error = self.invoke(
+                    ["run", "matrix-template-generate", "--input", "@-"],
+                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                )
+                self.assertEqual(cli.EXIT_INPUT, code)
+                self.assertEqual("input_error", self.payload(error)["error"])
+                request.assert_not_called()
+        for count in (1, 6, True):
+            with self.subTest(count=count), patch("hq_cli.client.request_json") as request:
+                payload = dict(base, count=count)
+                code, _, error = self.invoke(
+                    ["run", "matrix-template-batch-generate", "--input", "@-"],
+                    json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                )
+                self.assertEqual(cli.EXIT_INPUT, code)
+                self.assertEqual("input_error", self.payload(error)["error"])
+                request.assert_not_called()
+
+    def test_text_video_full_talking_flow_uses_import_plan_and_scene_selection(self):
+        self.authorize()
+        avatar_id = "local_avatar_" + "c" * 32
+        plan_id = "talking_plan_" + "d" * 32
+        source_hash = "e" * 64
+        base = {
+            "text": "完整文案", "template": "1080x1920/image_default.html",
+            "mode": "fixed", "style": "realistic_commercial",
+            "voice": "public:zh-CN-YunjianNeural", "speech_rate": 1.0,
+        }
+        talking = {
+            "enabled": True, "plan_id": plan_id, "source_hash": source_hash,
+            "ratio": 0.3, "default_avatar_asset_id": avatar_id,
+            "scenes": [
+                {"scene_id": "scene_01", "enabled": True},
+                {"scene_id": "scene_02", "enabled": False},
+            ],
+        }
+        quote = {"quote_token": "q.talking", "cost": 70, "scene_count": 2,
+                 "cost_breakdown": {"scene_count": 2, "total": 70}}
+        with patch("hq_cli.client.request_json", side_effect=[
+                (200, {"asset_id": avatar_id}),
+                (200, {"plan_id": plan_id, "source_hash": source_hash, "scenes": talking["scenes"]}),
+                (200, quote), (200, {"job_id": 93, "cost": 70})]) as request:
+            code, _, error = self.invoke([
+                "run", "text-video-avatar-import", "--input", "@-", "--confirm",
+            ], ('{"image_upload_id":"img_%s"}' % ("a" * 32)).encode())
+            self.assertEqual(0, code, error)
+            code, _, error = self.invoke([
+                "run", "text-video-plan", "--input", "@-", "--confirm",
+            ], json.dumps(dict(base, ratio=0.3), ensure_ascii=False).encode())
+            self.assertEqual(0, code, error)
+            payload = dict(base, talking_material=talking)
+            raw = json.dumps(payload, ensure_ascii=False).encode()
+            code, _, error = self.invoke([
+                "run", "text-video-generate", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            code, output, error = self.invoke([
+                "run", "text-video-generate", "--input", "@-", "--confirm",
+                "--quote-token", "q.talking"], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual(93, self.payload(output)["result"]["job_id"])
+        calls = request.call_args_list
+        self.assertEqual("text-video-avatar-import", calls[0].kwargs["body"]["action"])
+        self.assertEqual("text-video-plan", calls[1].kwargs["body"]["action"])
+        self.assertEqual(talking, calls[2].kwargs["body"]["input"]["talking_material"])
+        self.assertEqual(calls[2].kwargs["body"]["input"], calls[3].kwargs["body"]["input"])
+
+    def test_text_video_talking_input_is_rejected_locally_when_incomplete(self):
+        self.authorize()
+        payload = {
+            "text": "完整文案", "template": "1080x1920/image_default.html",
+            "style": "realistic_commercial", "voice": "public:zh-CN-YunjianNeural",
+            "talking_material": {"enabled": True},
+        }
+        with patch("hq_cli.client.request_json") as request:
+            code, _, error = self.invoke([
+                "run", "text-video-generate", "--input", "@-"],
+                json.dumps(payload, ensure_ascii=False).encode())
+        self.assertEqual(cli.EXIT_INPUT, code)
+        self.assertEqual("input_error", self.payload(error)["error"])
+        request.assert_not_called()
+
     def test_canvas_agent_plan_uses_paid_flow_without_auto_writing(self):
         self.authorize()
         snapshot = {
@@ -623,6 +958,24 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(0, code, error)
         self.assertEqual("vid_" + "a" * 32, self.payload(output)["result"]["upload_id"])
         upload.assert_called_once_with(video_path, "t" * 43)
+
+    def test_audio_upload_requires_confirmation_and_uses_file_transport(self):
+        self.authorize()
+        audio_path = os.path.join(self.temp.name, "sample.mp3")
+        with patch.object(client, "upload_audio") as upload:
+            code, _, error = self.invoke(["run", "audio-upload", "--file", audio_path])
+            self.assertEqual(cli.EXIT_CONFIRMATION, code)
+            upload.assert_not_called()
+            upload.return_value = (200, {
+                "upload_id": "aud_" + "a" * 32, "mime": "audio/mpeg", "bytes": 24,
+                "sha256": "b" * 64, "duration": 60.0, "expires_in": 3600,
+            })
+            code, output, error = self.invoke([
+                "run", "audio-upload", "--file", audio_path, "--confirm", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual("aud_" + "a" * 32, self.payload(output)["result"]["upload_id"])
+        upload.assert_called_once_with(audio_path, "t" * 43)
 
     def test_streaming_image_client_sends_no_local_path_or_filename(self):
         raw = b"\x89PNG\r\n\x1a\n" + b"private-image"
@@ -753,13 +1106,79 @@ class HqCliTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.upload_video(str(oversized), "t" * 43)
 
+    def test_streaming_audio_client_enforces_magic_size_and_private_transport(self):
+        raw = b"ID3" + b"private-audio"
+        audio_path = Path(self.temp.name) / "secret-name.mp3"
+        audio_path.write_bytes(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+
+        class Response:
+            status = 200
+
+            def read(self, _limit):
+                return json.dumps({"upload_id": "aud_" + "a" * 32, "sha256": digest}).encode()
+
+        class Connection:
+            def __init__(self):
+                self.headers, self.sent = {}, bytearray()
+
+            def putrequest(self, method, path, **_kwargs):
+                self.method, self.path = method, path
+
+            def putheader(self, key, value):
+                self.headers[key] = value
+
+            def endheaders(self):
+                pass
+
+            def send(self, chunk):
+                self.sent.extend(chunk)
+
+            def getresponse(self):
+                return Response()
+
+            def close(self):
+                pass
+
+        connection = Connection()
+        with patch.object(client.http.client, "HTTPSConnection", return_value=connection):
+            status, payload = client.upload_audio(str(audio_path), "t" * 43)
+        self.assertEqual((200, "aud_" + "a" * 32), (status, payload["upload_id"]))
+        self.assertEqual(raw, bytes(connection.sent))
+        self.assertEqual(client.AUDIO_UPLOAD_PATH, connection.path)
+        self.assertEqual(digest, connection.headers["X-HQ-Audio-SHA256"])
+        self.assertEqual("audio/mpeg", connection.headers["Content-Type"])
+        self.assertNotIn("secret-name.mp3", json.dumps(connection.headers))
+        self.assertEqual("audio/wav", client._audio_mime(b"RIFF1234WAVE"))
+        self.assertEqual("audio/ogg", client._audio_mime(b"OggS"))
+        self.assertEqual("audio/mp4", client._audio_mime(b"\x00\x00\x00\x18ftypM4A "))
+        self.assertEqual("audio/aac", client._audio_mime(b"\xff\xf1"))
+
+        link = Path(self.temp.name) / "linked.mp3"
+        try:
+            link.symlink_to(audio_path)
+        except OSError:
+            pass
+        else:
+            with self.assertRaises(ValueError):
+                client.upload_audio(str(link), "t" * 43)
+        with self.assertRaises(ValueError):
+            client.upload_audio("relative.mp3", "t" * 43)
+        oversized = Path(self.temp.name) / "oversized.mp3"
+        with oversized.open("wb") as handle:
+            handle.write(b"ID3")
+            handle.truncate(client.MAX_AUDIO_UPLOAD_BYTES + 1)
+        with self.assertRaises(ValueError):
+            client.upload_audio(str(oversized), "t" * 43)
+
     def test_navigation_is_main_site_only_and_never_opens_by_default(self):
         with patch("hq_cli.cli.webbrowser.open") as opened:
             code, output, error = self.invoke(["run", "image", "--input", "@-"], b'{"prompt":"A & B"}')
             self.assertEqual(0, code, error)
             self.assertEqual("https://huangquechuanmei.com/workbench/banana?prompt=A+%26+B", self.payload(output)["result"]["url"])
             for identifier, path in {
-                "text-video": "/workbench/text-video", "short-drama": "/workbench/short-drama",
+                "text-video": "/workbench/text-video", "matrix-template": "/workbench/matrix-template.html",
+                "short-drama": "/workbench/short-drama",
                 "pricing-page": "/workbench/pricing", "invite": "/workbench/invite",
                 "recharge": "/workbench/recharge", "bots": "/workbench/bots",
             }.items():
@@ -775,8 +1194,15 @@ class HqCliTests(unittest.TestCase):
             (["run", "canvas", "--input", "@-"], b'{"collab":"no"}'),
             (["run", "audio-generate", "--input", "@-"], b'{"text":"x","speed":NaN}'),
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","generate_audio":1}'),
+            (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"minimax","resolution":"768p"}'),
             (["run", "video-generate", "--input", "@-"], b'{"prompt":"x","channel":"sora","seconds":5}'),
             (["run", "asset-tags", "--input", "@-"], b'{"kind":"image","key":"x","tags":"not-array"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"avatar","keys":["a_1"]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":[]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":"v_1"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","keys":["v_1","v_1"]}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video"}'),
+            (["run", "asset-delete", "--input", "@-"], b'{"kind":"video","id":9,"keys":["v_1"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["twitter"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"platforms":["douyin"],"channels_targets":["target"]}'),
             (["run", "leads-generate", "--input", "@-"], b'{"keyword":"x","platforms":["channels"]}'),
@@ -789,6 +1215,92 @@ class HqCliTests(unittest.TestCase):
                 code, output, error = self.invoke(argv, raw)
                 self.assertIn(code, {cli.EXIT_USAGE, cli.EXIT_INPUT})
                 self.assertEqual("hq.error/v1", self.payload(error)["schema"])
+        request.assert_not_called()
+
+    def test_video_channel_contract_is_enforced_before_network(self):
+        _, output, error = self.invoke(["capabilities"])
+        self.assertFalse(error)
+        video = {
+            item["id"]: item for item in self.payload(output)["capabilities"]
+        }["video-generate"]
+        schema = video["input_schema"]
+        self.assertTrue(schema["allOf"])
+        rules = schema["x-hq-channel-rules"]
+        self.assertEqual([4, 15], rules["micro"]["duration"])
+        self.assertEqual([3, 10], rules["omni"]["duration"])
+        self.assertEqual(["2k"], rules["minimax"]["resolutions"])
+        self.assertIn("21:9", rules["minimax"]["ratios"])
+        self.assertNotIn("3:2", rules["minimax"]["ratios"])
+
+        valid = (
+            {"channel": "grok", "ratio": "3:2", "duration": 1, "resolution": "480p"},
+            {"channel": "micro", "ratio": "21:9", "duration": 4, "resolution": "1080p"},
+            {"channel": "omni", "ratio": "16:9", "duration": 3, "resolution": "720p"},
+            {"channel": "minimax", "ratio": "adaptive", "duration": 4, "resolution": "2k"},
+            {"channel": "sora", "model": "sora-2-pro", "seconds": 12,
+             "ratio": "16:9", "resolution": "1080p"},
+        )
+        invalid = (
+            {"channel": "grok", "model": "grok-imagine-video-1.5"},
+            {"channel": "grok", "resolution": "480p",
+             "reference_upload_ids": ["img_" + "a" * 32]},
+            {"channel": "micro", "duration": 3},
+            {"channel": "micro", "ratio": "3:2"},
+            {"channel": "omni", "duration": 11},
+            {"channel": "omni", "resolution": "1080p"},
+            {"channel": "minimax", "duration": 3},
+            {"channel": "minimax", "ratio": "3:2"},
+            {"channel": "sora", "model": "sora-2", "resolution": "1080p"},
+            {"channel": "grok", "resolution": "2k"},
+        )
+
+        with patch("hq_cli.client.request_json") as request:
+            for fields in valid:
+                with self.subTest(valid=fields):
+                    raw = json.dumps({"prompt": "valid channel contract", **fields}).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_AUTH, code, error)
+                    self.assertEqual("auth_required", self.payload(error)["error"])
+            for fields in invalid:
+                with self.subTest(invalid=fields):
+                    raw = json.dumps({"prompt": "invalid channel contract", **fields}).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_INPUT, code, error)
+                    self.assertEqual("input_error", self.payload(error)["error"])
+            reference_limits = {"grok": 7, "micro": 9, "omni": 6, "minimax": 5, "sora": 1}
+            for channel, limit in reference_limits.items():
+                valid_references = ["img_" + format(index, "032x") for index in range(limit)]
+                with self.subTest(channel=channel, references="max"):
+                    raw = json.dumps({
+                        "prompt": "reference limit", "channel": channel,
+                        "reference_upload_ids": valid_references,
+                    }).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_AUTH, code, error)
+                with self.subTest(channel=channel, references="overflow"):
+                    raw = json.dumps({
+                        "prompt": "reference overflow", "channel": channel,
+                        "reference_upload_ids": valid_references + ["img_" + format(limit, "032x")],
+                    }).encode()
+                    code, output, error = self.invoke(
+                        ["run", "video-generate", "--input", "@-"], raw,
+                    )
+                    self.assertEqual(cli.EXIT_INPUT, code, error)
+                    self.assertEqual("input_error", self.payload(error)["error"])
+            raw = json.dumps({
+                "prompt": "empty references", "reference_upload_ids": [],
+            }).encode()
+            code, output, error = self.invoke(
+                ["run", "video-generate", "--input", "@-"], raw,
+            )
+            self.assertEqual(cli.EXIT_INPUT, code, error)
+            self.assertEqual("input_error", self.payload(error)["error"])
         request.assert_not_called()
 
     def test_deep_json_and_invalid_unicode_are_json_errors(self):

@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import re
 import sys
 import time
 import urllib.error
@@ -14,7 +15,10 @@ from . import __version__
 from . import client
 from . import mcp_server
 from . import skill_install
-from .catalog import CAPABILITIES, ENVIRONMENTS, capability_list, resolve_url
+from .catalog import (
+    CAPABILITIES, ENVIRONMENTS, VIDEO_CHANNEL_RULES,
+    capability_list, resolve_url,
+)
 
 
 EXIT_USAGE = 2
@@ -34,7 +38,7 @@ LOGIN_SCOPES = [
     "canvas:write", "canvas:agent", "canvas:edit", "tasks:read", "assets:read", "assets:write", "assets:upload",
     "generation:quote", "generation:submit",
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
-    "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read",
+    "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read", "short-drama:write",
 ]
 
 
@@ -119,6 +123,52 @@ def _load_json(source):
     return payload
 
 
+def _validate_video_channel(payload):
+    channel = payload.get("channel", "grok")
+    rule = VIDEO_CHANNEL_RULES[channel]
+    ratio = payload.get("ratio", rule["default_ratio"])
+    if ratio not in rule["ratios"]:
+        raise CliError(EXIT_INPUT, "input_error", "video ratio is not supported by channel=%s" % channel)
+    references = payload.get("reference_upload_ids")
+    if references is not None and not 1 <= len(references) <= rule["reference_max"]:
+        raise CliError(
+            EXIT_INPUT, "input_error",
+            "video reference_upload_ids exceeds channel=%s limit" % channel,
+        )
+    resolution = payload.get("resolution", rule["default_resolution"])
+    if channel == "sora":
+        if "duration" in payload or "generate_audio" in payload:
+            raise CliError(EXIT_INPUT, "input_error", "sora uses seconds and rejects duration or generate_audio")
+        seconds = payload.get("seconds", rule["default_seconds"])
+        if seconds not in rule["seconds"]:
+            raise CliError(EXIT_INPUT, "input_error", "sora seconds must be 4, 8, or 12")
+        model = payload.get("model", rule["default_model"])
+        if model not in rule["models"]:
+            raise CliError(EXIT_INPUT, "input_error", "unsupported sora model")
+        if resolution not in rule["model_resolutions"][model]:
+            raise CliError(EXIT_INPUT, "input_error", "video resolution is not supported by sora model")
+        return
+    if "seconds" in payload:
+        raise CliError(EXIT_INPUT, "input_error", "seconds is only supported by channel=sora")
+    duration = payload.get("duration", rule["default_duration"])
+    if not rule["duration"][0] <= duration <= rule["duration"][1]:
+        raise CliError(EXIT_INPUT, "input_error", "video duration is not supported by channel=%s" % channel)
+    if resolution not in rule["resolutions"]:
+        raise CliError(EXIT_INPUT, "input_error", "video resolution is not supported by channel=%s" % channel)
+    if "model" in payload and channel != "grok":
+        raise CliError(EXIT_INPUT, "input_error", "model is only supported by grok or sora")
+    if "generate_audio" in payload and not rule["generate_audio"]:
+        raise CliError(EXIT_INPUT, "input_error", "generate_audio is only supported by channel=micro")
+    if channel == "grok":
+        model = payload.get("model", rule["default_model"])
+        if model not in rule["models"]:
+            raise CliError(EXIT_INPUT, "input_error", "unsupported grok model")
+        if model in rule["reference_required_models"] and not references:
+            raise CliError(EXIT_INPUT, "input_error", "grok video 1.5 requires reference_upload_ids")
+        if references and resolution not in rule["reference_resolutions"]:
+            raise CliError(EXIT_INPUT, "input_error", "grok reference video resolution must be 720p")
+
+
 def _validate(capability, payload):
     schema = capability["input_schema"]
     properties = schema["properties"]
@@ -184,16 +234,63 @@ def _validate(capability, payload):
             raise CliError(EXIT_INPUT, "input_error", "input field %s is too short" % key)
         if "maxLength" in definition and len(value) > definition["maxLength"]:
             raise CliError(EXIT_INPUT, "input_error", "input field %s is too long" % key)
+        if "pattern" in definition and not re.fullmatch(definition["pattern"], value):
+            raise CliError(EXIT_INPUT, "input_error", "input field %s has an invalid format" % key)
         if "minimum" in definition and value < definition["minimum"]:
             raise CliError(EXIT_INPUT, "input_error", "input field %s is below minimum" % key)
         if "maximum" in definition and value > definition["maximum"]:
             raise CliError(EXIT_INPUT, "input_error", "input field %s is above maximum" % key)
+    if capability.get("id") == "video-generate":
+        _validate_video_channel(payload)
+    if capability.get("id") == "text-video-generate":
+        _validate_text_video_talking(payload)
     if capability.get("id") == "leads-generate":
         platforms = payload.get("platforms") or []
         if any(platform in {"douyin", "xhs"} for platform in platforms) and not payload.get("keyword"):
             raise CliError(EXIT_INPUT, "input_error", "douyin or xhs leads require keyword")
         if "channels" in platforms and not payload.get("channels_targets"):
             raise CliError(EXIT_INPUT, "input_error", "channels leads require channels_targets")
+
+
+def _validate_text_video_talking(payload):
+    talking = payload.get("talking_material")
+    if talking is None:
+        return
+    required = {"enabled", "plan_id", "source_hash", "ratio", "default_avatar_asset_id", "scenes"}
+    if set(talking) != required or talking.get("enabled") is not True:
+        raise CliError(EXIT_INPUT, "input_error", "talking_material has invalid fields")
+    if not re.fullmatch(r"talking_plan_[0-9a-f]{32}", str(talking.get("plan_id") or "")):
+        raise CliError(EXIT_INPUT, "input_error", "talking_material plan_id is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(talking.get("source_hash") or "")):
+        raise CliError(EXIT_INPUT, "input_error", "talking_material source_hash is invalid")
+    if (isinstance(talking.get("ratio"), bool)
+            or not isinstance(talking.get("ratio"), (int, float))
+            or not 0.1 <= float(talking["ratio"]) <= 0.5):
+        raise CliError(EXIT_INPUT, "input_error", "talking_material ratio is invalid")
+    avatar_pattern = r"local_avatar_[0-9a-f]{32}"
+    if not re.fullmatch(avatar_pattern, str(talking.get("default_avatar_asset_id") or "")):
+        raise CliError(EXIT_INPUT, "input_error", "talking_material default avatar is invalid")
+    scenes = talking.get("scenes")
+    if not isinstance(scenes, list) or not 1 <= len(scenes) <= 20:
+        raise CliError(EXIT_INPUT, "input_error", "talking_material scenes must contain 1-20 items")
+    seen = set()
+    enabled = False
+    for scene in scenes:
+        if not isinstance(scene, dict) or not {"scene_id", "enabled"} <= set(scene) or set(scene) - {
+                "scene_id", "enabled", "avatar_asset_id"}:
+            raise CliError(EXIT_INPUT, "input_error", "talking_material scene is invalid")
+        scene_id = str(scene.get("scene_id") or "")
+        if not re.fullmatch(r"scene_[0-9]{2}", scene_id) or scene_id in seen:
+            raise CliError(EXIT_INPUT, "input_error", "talking_material scene_id is invalid or duplicated")
+        seen.add(scene_id)
+        if not isinstance(scene.get("enabled"), bool):
+            raise CliError(EXIT_INPUT, "input_error", "talking_material scene enabled must be boolean")
+        enabled = enabled or scene["enabled"]
+        override = scene.get("avatar_asset_id")
+        if override is not None and (not scene["enabled"] or not re.fullmatch(avatar_pattern, str(override))):
+            raise CliError(EXIT_INPUT, "input_error", "talking_material scene avatar is invalid")
+    if not enabled:
+        raise CliError(EXIT_INPUT, "input_error", "talking_material must enable at least one scene")
 
 
 def _doctor(environment):
@@ -220,7 +317,14 @@ def _checked_response(status, payload, accepted=None):
         if status == 401:
             raise CliError(EXIT_AUTH, "auth_error", str(detail) + "; run `hq login --json`", {"http_status": status, "code": code})
         exit_code = EXIT_CONFIRMATION if status == 409 else EXIT_API
-        raise CliError(exit_code, str(code or "api_error"), str(detail), {"http_status": status})
+        details = {"http_status": status}
+        if isinstance(payload, dict):
+            for key in (
+                    "jobs", "job_ids", "failures", "next_index", "batch_id",
+                    "refund_state", "points_left", "submitted_count", "failed_count"):
+                if key in payload:
+                    details[key] = payload[key]
+        raise CliError(exit_code, str(code or "api_error"), str(detail), details)
     return payload
 
 
@@ -430,8 +534,12 @@ def main(argv=None):
                 if not args.file:
                     raise CliError(EXIT_USAGE, "usage_error", "%s requires --file /absolute/path" % args.id)
                 credentials = _credentials()
-                upload_kind = "video" if args.id == "video-upload" else "image"
-                uploader = client.upload_video if upload_kind == "video" else client.upload_image
+                if args.id == "video-upload":
+                    upload_kind, uploader = "video", client.upload_video
+                elif args.id == "audio-upload":
+                    upload_kind, uploader = "audio", client.upload_audio
+                else:
+                    upload_kind, uploader = "image", client.upload_image
                 try:
                     status, upload = uploader(args.file, credentials["access_token"])
                 except ValueError as exc:
