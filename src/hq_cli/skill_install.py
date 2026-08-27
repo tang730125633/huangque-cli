@@ -16,9 +16,10 @@ from pathlib import Path
 from . import __version__
 
 
+SKILL_VERSION = "0.1.1"
 MANIFEST_URL = (
     "https://raw.githubusercontent.com/"
-    "tang730125633/huangque-agent-skill/main/manifest.json"
+    "tang730125633/huangque-agent-skill/v%s/manifest.json" % SKILL_VERSION
 )
 RAW_ROOT = (
     "https://raw.githubusercontent.com/"
@@ -78,7 +79,7 @@ def _validated_manifest(fetch):
         raise SkillInstallError("skill_manifest_error", "unsupported Skill manifest schema")
     skill = manifest.get("skill") or {}
     version = skill.get("version")
-    if skill.get("name") != SKILL_NAME or not isinstance(version, str):
+    if skill.get("name") != SKILL_NAME or version != SKILL_VERSION:
         raise SkillInstallError("skill_manifest_error", "unexpected Skill identity")
     _version_tuple(version)
     if manifest.get("source_ref") != "v" + version:

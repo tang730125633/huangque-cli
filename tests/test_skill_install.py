@@ -15,9 +15,9 @@ OPENAI_YAML = b'interface:\n  display_name: "Huangque CLI"\n'
 def manifest_bytes(skill=SKILL, openai_yaml=OPENAI_YAML):
     manifest = {
         "schema": "huangque.agent-skill/v1",
-        "skill": {"name": "use-huangque-cli", "version": "0.1.0"},
+        "skill": {"name": "use-huangque-cli", "version": "0.1.1"},
         "cli": {"minimum": "0.10.2", "tested": "0.10.2", "latest": "0.10.2", "installer": "0.11.0"},
-        "source_ref": "v0.1.0",
+        "source_ref": "v0.1.1",
         "files": [
             {
                 "path": "skills/use-huangque-cli/SKILL.md",
@@ -55,6 +55,10 @@ def fixture_fetch(skill=SKILL, openai_yaml=OPENAI_YAML):
 
 
 class SkillInstallTests(unittest.TestCase):
+    def test_manifest_is_pinned_to_the_reviewed_skill_release(self):
+        self.assertEqual("0.1.1", skill_install.SKILL_VERSION)
+        self.assertIn("/v0.1.1/manifest.json", skill_install.MANIFEST_URL)
+
     def test_installs_one_canonical_skill_into_each_agent_root(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
@@ -70,7 +74,7 @@ class SkillInstallTests(unittest.TestCase):
                     self.assertEqual("installed", result["status"])
                     self.assertEqual(SKILL, (destination / "SKILL.md").read_bytes())
                     self.assertEqual(OPENAI_YAML, (destination / "agents/openai.yaml").read_bytes())
-                    self.assertEqual("0.1.0", json.loads(
+                    self.assertEqual("0.1.1", json.loads(
                         (destination / ".huangque-skill.json").read_text(encoding="utf-8")
                     )["version"])
 
