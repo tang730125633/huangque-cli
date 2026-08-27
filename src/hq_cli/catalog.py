@@ -384,6 +384,19 @@ CAPABILITIES["video-upload"]["file_input"] = {
 CAPABILITIES["video-upload"]["next_actions"] = [
     "把返回的 upload_id 写入电影化身或经典换装动作的 reference_video_upload_ids / person_video_upload_id。",
 ]
+CAPABILITIES["audio-upload"] = _upload(
+    "audio-upload", "上传本人口播音频样音",
+    "把一段本人 MP3、WAV、M4A、AAC 或 OGG 音频流式上传为本人短期私有 upload_id；不扣点，不返回公开素材地址。",
+    "assets:upload",
+)
+CAPABILITIES["audio-upload"]["file_input"] = {
+    "argument": "--file", "path": "absolute", "maxBytes": 10 * 1024 * 1024,
+    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg"],
+    "accountActiveMaxFiles": 20, "accountActiveMaxBytes": 96 * 1024 * 1024,
+}
+CAPABILITIES["audio-upload"]["next_actions"] = [
+    "把返回的 upload_id 写入 voice-clone-create 的 audio_upload_id。",
+]
 ASSET_MARK_FIELDS = {
     "kind": {"type": "string", "enum": ["image", "audio", "video", "avatar", "copy", "collect", "leads", "breakdown"]},
     "key": {"type": "string", "minLength": 1, "maxLength": 500},
@@ -948,6 +961,7 @@ for identifier, website_modes in {
     "image": ["banana", "openai", "seedream", "xiaole"],
     "image-upload": ["banana", "openai", "seedream", "xiaole"],
     "video-upload": ["cinematic", "tryon"],
+    "audio-upload": ["tts"],
     "image-generate": ["banana", "openai", "seedream", "xiaole"],
     "video": ["one_click", "digital_ip", "cinematic", "tryon", "grok", "sora", "minimax", "omni", "seedance"],
     "video-generate": ["grok", "sora", "minimax", "omni", "seedance"],
