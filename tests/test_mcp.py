@@ -89,7 +89,7 @@ class McpServerTests(unittest.TestCase):
         requests = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "server/discover", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
             {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "hq_cli_version", "arguments": {}}},
         ]
@@ -105,7 +105,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual([1, 2, 3, 4], [item["id"] for item in responses])
         self.assertEqual("huangque", responses[0]["result"]["serverInfo"]["name"])
         self.assertEqual("2025-06-18", responses[0]["result"]["protocolVersion"])
-        self.assertEqual("2026-07-28", responses[1]["result"]["supportedVersions"][0])
+        self.assertEqual({}, responses[1]["result"])
         self.assertEqual(len(CAPABILITIES) + len(mcp_server.CONTROL_TOOLS), len(responses[2]["result"]["tools"]))
         self.assertEqual("hq.version/v1", responses[3]["result"]["structuredContent"]["schema"])
 
@@ -115,7 +115,7 @@ class McpServerTests(unittest.TestCase):
             mcp_server.CLIENT_CAPABILITIES_META: {},
         }
         requests = [
-            {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}},
+            {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": meta}},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": meta}},
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
                 "_meta": meta, "name": "hq_cli_version", "arguments": {},
@@ -159,6 +159,39 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual([-32602, -32022, -32022], [item["error"]["code"] for item in responses])
         self.assertEqual("9999-01-01", responses[1]["error"]["data"]["requested"])
         self.assertIn(mcp_server.PROTOCOL_VERSION, responses[1]["error"]["data"]["supported"])
+
+    def test_stdio_connection_locks_legacy_or_modern_era(self):
+        meta = {
+            mcp_server.PROTOCOL_META: mcp_server.PROTOCOL_VERSION,
+            mcp_server.CLIENT_CAPABILITIES_META: {},
+        }
+        legacy_then_modern = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25",
+            }},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": meta}},
+        ]
+        output = io.StringIO()
+        self.assertEqual(0, mcp_server.serve(
+            io.StringIO("".join(json.dumps(item) + "\n" for item in legacy_then_modern)), output,
+        ))
+        responses = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(-32022, responses[1]["error"]["code"])
+
+        modern_then_legacy = [
+            {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {"_meta": meta}},
+            {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25",
+            }},
+            {"jsonrpc": "2.0", "id": 3, "method": "ping", "params": {"_meta": meta}},
+        ]
+        output = io.StringIO()
+        self.assertEqual(0, mcp_server.serve(
+            io.StringIO("".join(json.dumps(item) + "\n" for item in modern_then_legacy)), output,
+        ))
+        responses = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(-32022, responses[1]["error"]["code"])
+        self.assertEqual(-32601, responses[2]["error"]["code"])
 
     def test_parse_error_returns_json_rpc_error_with_null_id(self):
         output = io.StringIO()

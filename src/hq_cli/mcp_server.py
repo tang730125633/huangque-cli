@@ -283,7 +283,7 @@ def _tool_result(code, payload):
     return result
 
 
-def _handle(request, runner):
+def _handle(request, runner, mode):
     method = request.get("method")
     if method in {"notifications/initialized", "notifications/cancelled"}:
         return None
@@ -313,7 +313,7 @@ def _handle(request, runner):
             "ttlMs": 300000,
             "cacheScope": "public",
         }
-    if method == "ping":
+    if method == "ping" and mode == "legacy":
         return {}
     if method == "tools/list":
         return {
@@ -333,10 +333,8 @@ def _rpc_error(code, message, data=None):
     return error
 
 
-def _request_mode(request, legacy_protocol):
+def _request_mode(request, connection_mode, legacy_protocol):
     method = request.get("method")
-    if method == "server/discover":
-        return "modern", legacy_protocol
     if method == "initialize":
         params = request.get("params") or {}
         requested = params.get("protocolVersion") if isinstance(params, dict) else None
@@ -345,12 +343,17 @@ def _request_mode(request, legacy_protocol):
                 -32022, "Unsupported protocol version",
                 {"requested": str(requested or ""), "supported": list(SUPPORTED_PROTOCOL_VERSIONS)},
             ))
-        return "legacy", requested
+        if connection_mode == "modern":
+            raise ValueError((
+                -32022, "Connection already uses the modern protocol era",
+                {"requested": requested, "supported": [PROTOCOL_VERSION]},
+            ))
+        return "legacy", "legacy", requested
 
     params = request.get("params")
     meta = params.get("_meta") if isinstance(params, dict) else None
-    if meta is None and legacy_protocol in LEGACY_PROTOCOL_VERSIONS:
-        return "legacy", legacy_protocol
+    if meta is None and connection_mode == "legacy" and legacy_protocol in LEGACY_PROTOCOL_VERSIONS:
+        return "legacy", connection_mode, legacy_protocol
     if not isinstance(meta, dict):
         raise ValueError((-32602, "Invalid params: required _meta is missing", None))
     requested = meta.get(PROTOCOL_META)
@@ -361,7 +364,12 @@ def _request_mode(request, legacy_protocol):
         ))
     if not isinstance(meta.get(CLIENT_CAPABILITIES_META), dict):
         raise ValueError((-32602, "Invalid params: clientCapabilities is required", None))
-    return "modern", legacy_protocol
+    if connection_mode == "legacy":
+        raise ValueError((
+            -32022, "Connection already uses the legacy protocol era",
+            {"requested": requested, "supported": [legacy_protocol]},
+        ))
+    return "modern", "modern", legacy_protocol
 
 
 def _attach_server_info(result):
@@ -375,6 +383,7 @@ def _attach_server_info(result):
 def serve(input_stream=None, output_stream=None, runner=_run_hq):
     input_stream = input_stream or sys.stdin
     output_stream = output_stream or sys.stdout
+    connection_mode = None
     legacy_protocol = None
     for line in input_stream:
         request_id = None
@@ -387,8 +396,10 @@ def serve(input_stream=None, output_stream=None, runner=_run_hq):
             request_id = request.get("id")
             if request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
                 raise ValueError((-32600, "Invalid Request", None))
-            mode, legacy_protocol = _request_mode(request, legacy_protocol)
-            result = _handle(request, runner)
+            mode, connection_mode, legacy_protocol = _request_mode(
+                request, connection_mode, legacy_protocol,
+            )
+            result = _handle(request, runner, mode)
             if request_id is None:
                 continue
             if mode == "modern":
