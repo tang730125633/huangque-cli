@@ -109,15 +109,63 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(len(CAPABILITIES) + len(mcp_server.CONTROL_TOOLS), len(responses[2]["result"]["tools"]))
         self.assertEqual("hq.version/v1", responses[3]["result"]["structuredContent"]["schema"])
 
-    def test_current_protocol_is_not_downgraded(self):
-        source = io.StringIO(json.dumps({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"protocolVersion": mcp_server.PROTOCOL_VERSION},
-        }) + "\n")
+    def test_current_protocol_uses_stateless_request_metadata(self):
+        meta = {
+            mcp_server.PROTOCOL_META: mcp_server.PROTOCOL_VERSION,
+            mcp_server.CLIENT_CAPABILITIES_META: {},
+        }
+        requests = [
+            {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": meta}},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+                "_meta": meta, "name": "hq_cli_version", "arguments": {},
+            }},
+        ]
+        source = io.StringIO("".join(json.dumps(item) + "\n" for item in requests))
         output = io.StringIO()
-        self.assertEqual(0, mcp_server.serve(source, output))
+        calls = []
+
+        def runner(arguments, stdin_text):
+            calls.append((arguments, stdin_text))
+            return 0, {"schema": "hq.version/v1", "cli_version": "0.12.0"}
+
+        self.assertEqual(0, mcp_server.serve(source, output, runner=runner))
+        responses = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(mcp_server.PROTOCOL_VERSION, responses[0]["result"]["supportedVersions"][0])
+        self.assertEqual(
+            {"name": "huangque", "version": "0.12.0"},
+            responses[1]["result"]["_meta"][mcp_server.SERVER_INFO_META],
+        )
+        self.assertEqual([(["version"], "")], calls)
+        self.assertEqual("hq.version/v1", responses[2]["result"]["structuredContent"]["schema"])
+        self.assertIn(mcp_server.SERVER_INFO_META, responses[2]["result"]["_meta"])
+
+    def test_current_protocol_rejects_missing_or_unknown_metadata(self):
+        requests = [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {"_meta": {
+                mcp_server.PROTOCOL_META: "9999-01-01",
+                mcp_server.CLIENT_CAPABILITIES_META: {},
+            }}},
+            {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {
+                "protocolVersion": mcp_server.PROTOCOL_VERSION,
+            }},
+        ]
+        output = io.StringIO()
+        self.assertEqual(0, mcp_server.serve(
+            io.StringIO("".join(json.dumps(item) + "\n" for item in requests)), output,
+        ))
+        responses = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([-32602, -32022, -32022], [item["error"]["code"] for item in responses])
+        self.assertEqual("9999-01-01", responses[1]["error"]["data"]["requested"])
+        self.assertIn(mcp_server.PROTOCOL_VERSION, responses[1]["error"]["data"]["supported"])
+
+    def test_parse_error_returns_json_rpc_error_with_null_id(self):
+        output = io.StringIO()
+        self.assertEqual(0, mcp_server.serve(io.StringIO("{bad json\n"), output))
         response = json.loads(output.getvalue())
-        self.assertEqual(mcp_server.PROTOCOL_VERSION, response["result"]["protocolVersion"])
+        self.assertIsNone(response["id"])
+        self.assertEqual(-32700, response["error"]["code"])
 
 
 if __name__ == "__main__":

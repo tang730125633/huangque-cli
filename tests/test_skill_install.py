@@ -54,10 +54,15 @@ def fixture_fetch(skill=SKILL, openai_yaml=OPENAI_YAML):
     return fetch
 
 
+FIXTURE_MANIFEST_SHA256 = hashlib.sha256(manifest_bytes()).hexdigest()
+
+
 class SkillInstallTests(unittest.TestCase):
     def test_manifest_is_pinned_to_the_reviewed_skill_release(self):
         self.assertEqual("0.1.1", skill_install.SKILL_VERSION)
-        self.assertIn("/v0.1.1/manifest.json", skill_install.MANIFEST_URL)
+        self.assertIn(skill_install.SKILL_COMMIT, skill_install.MANIFEST_URL)
+        self.assertEqual(40, len(skill_install.SKILL_COMMIT))
+        self.assertRegex(skill_install.MANIFEST_SHA256, r"^[0-9a-f]{64}$")
 
     def test_installs_one_canonical_skill_into_each_agent_root(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -70,7 +75,10 @@ class SkillInstallTests(unittest.TestCase):
             }
             for target, destination in expected.items():
                 with self.subTest(target=target):
-                    result = skill_install.install_skill(target, home=home, fetch=fixture_fetch())
+                    result = skill_install.install_skill(
+                        target, home=home, fetch=fixture_fetch(),
+                        _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+                    )
                     self.assertEqual("installed", result["status"])
                     self.assertEqual(SKILL, (destination / "SKILL.md").read_bytes())
                     self.assertEqual(OPENAI_YAML, (destination / "agents/openai.yaml").read_bytes())
@@ -80,8 +88,12 @@ class SkillInstallTests(unittest.TestCase):
 
     def test_repeat_install_is_a_noop(self):
         with tempfile.TemporaryDirectory() as temp:
-            first = skill_install.install_skill("codex", home=temp, fetch=fixture_fetch())
-            second = skill_install.install_skill("codex", home=temp, fetch=fixture_fetch())
+            first = skill_install.install_skill(
+                "codex", home=temp, fetch=fixture_fetch(), _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+            )
+            second = skill_install.install_skill(
+                "codex", home=temp, fetch=fixture_fetch(), _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+            )
         self.assertEqual("installed", first["status"])
         self.assertEqual("current", second["status"])
 
@@ -91,9 +103,14 @@ class SkillInstallTests(unittest.TestCase):
             destination.mkdir(parents=True)
             (destination / "SKILL.md").write_text("personal changes", encoding="utf-8")
             with self.assertRaises(skill_install.SkillInstallError) as raised:
-                skill_install.install_skill("deepseek", home=temp, fetch=fixture_fetch())
+                skill_install.install_skill(
+                    "deepseek", home=temp, fetch=fixture_fetch(), _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+                )
             self.assertEqual("skill_replace_required", raised.exception.error)
-            result = skill_install.install_skill("deepseek", replace=True, home=temp, fetch=fixture_fetch())
+            result = skill_install.install_skill(
+                "deepseek", replace=True, home=temp, fetch=fixture_fetch(),
+                _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+            )
             self.assertEqual("updated", result["status"])
             self.assertEqual("personal changes", (Path(result["backup"]) / "SKILL.md").read_text(encoding="utf-8"))
 
@@ -105,7 +122,9 @@ class SkillInstallTests(unittest.TestCase):
                 return b"corrupt" if url.endswith("/SKILL.md") else fetch(url, max_bytes)
 
             with self.assertRaises(skill_install.SkillInstallError) as raised:
-                skill_install.install_skill("pi", home=temp, fetch=corrupted)
+                skill_install.install_skill(
+                    "pi", home=temp, fetch=corrupted, _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+                )
             self.assertEqual("skill_hash_error", raised.exception.error)
             self.assertFalse((Path(temp) / ".pi/agent/skills/use-huangque-cli").exists())
 
@@ -118,13 +137,25 @@ class SkillInstallTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaises(skill_install.SkillInstallError) as raised:
-                skill_install.install_skill("codex", home=temp, fetch=fetch)
+                skill_install.install_skill(
+                    "codex", home=temp, fetch=fetch,
+                    _manifest_sha256=hashlib.sha256(json.dumps(manifest).encode()).hexdigest(),
+                )
         self.assertEqual("skill_manifest_error", raised.exception.error)
 
     def test_mcp_entry_uses_the_current_hq_process(self):
-        result = skill_install.install_skill("mcp", fetch=fixture_fetch())
+        result = skill_install.install_skill(
+            "mcp", fetch=fixture_fetch(), _manifest_sha256=FIXTURE_MANIFEST_SHA256,
+        )
         self.assertEqual("available", result["status"])
         self.assertEqual({"command": "hq", "args": ["mcp"]}, result["server"])
+
+    def test_manifest_hash_mismatch_is_rejected_before_parsing(self):
+        with self.assertRaises(skill_install.SkillInstallError) as raised:
+            skill_install.install_skill(
+                "codex", fetch=fixture_fetch(), _manifest_sha256="0" * 64,
+            )
+        self.assertEqual("skill_hash_error", raised.exception.error)
 
     def test_cli_surfaces_installer_result_as_json(self):
         with patch("hq_cli.skill_install.install_skill", return_value={

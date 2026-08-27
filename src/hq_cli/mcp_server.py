@@ -14,6 +14,9 @@ from .catalog import CAPABILITIES, ENVIRONMENTS
 PROTOCOL_VERSION = "2026-07-28"
 LEGACY_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18")
 SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, *LEGACY_PROTOCOL_VERSIONS)
+PROTOCOL_META = "io.modelcontextprotocol/protocolVersion"
+CLIENT_CAPABILITIES_META = "io.modelcontextprotocol/clientCapabilities"
+SERVER_INFO_META = "io.modelcontextprotocol/serverInfo"
 CONTROL_TOOLS = {
     "hq_cli_help": {
         "description": "Show the fixed Huangque CLI command catalog.",
@@ -286,9 +289,8 @@ def _handle(request, runner):
         return None
     if method == "initialize":
         requested = (request.get("params") or {}).get("protocolVersion")
-        negotiated = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
         return {
-            "protocolVersion": negotiated,
+            "protocolVersion": requested,
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": "huangque", "version": __version__},
             "instructions": (
@@ -324,28 +326,91 @@ def _handle(request, runner):
     raise KeyError("method not found")
 
 
+def _rpc_error(code, message, data=None):
+    error = {"code": code, "message": message}
+    if data is not None:
+        error["data"] = data
+    return error
+
+
+def _request_mode(request, legacy_protocol):
+    method = request.get("method")
+    if method == "server/discover":
+        return "modern", legacy_protocol
+    if method == "initialize":
+        params = request.get("params") or {}
+        requested = params.get("protocolVersion") if isinstance(params, dict) else None
+        if requested not in LEGACY_PROTOCOL_VERSIONS:
+            raise ValueError((
+                -32022, "Unsupported protocol version",
+                {"requested": str(requested or ""), "supported": list(SUPPORTED_PROTOCOL_VERSIONS)},
+            ))
+        return "legacy", requested
+
+    params = request.get("params")
+    meta = params.get("_meta") if isinstance(params, dict) else None
+    if meta is None and legacy_protocol in LEGACY_PROTOCOL_VERSIONS:
+        return "legacy", legacy_protocol
+    if not isinstance(meta, dict):
+        raise ValueError((-32602, "Invalid params: required _meta is missing", None))
+    requested = meta.get(PROTOCOL_META)
+    if requested != PROTOCOL_VERSION:
+        raise ValueError((
+            -32022, "Unsupported protocol version",
+            {"requested": str(requested or ""), "supported": list(SUPPORTED_PROTOCOL_VERSIONS)},
+        ))
+    if not isinstance(meta.get(CLIENT_CAPABILITIES_META), dict):
+        raise ValueError((-32602, "Invalid params: clientCapabilities is required", None))
+    return "modern", legacy_protocol
+
+
+def _attach_server_info(result):
+    if not isinstance(result, dict):
+        return result
+    meta = result.setdefault("_meta", {})
+    meta.setdefault(SERVER_INFO_META, {"name": "huangque", "version": __version__})
+    return result
+
+
 def serve(input_stream=None, output_stream=None, runner=_run_hq):
     input_stream = input_stream or sys.stdin
     output_stream = output_stream or sys.stdout
+    legacy_protocol = None
     for line in input_stream:
         request_id = None
+        parsed_request = False
         try:
             request = json.loads(line)
             if not isinstance(request, dict):
-                raise ValueError("request must be an object")
+                raise ValueError((-32600, "Invalid Request", None))
+            parsed_request = True
             request_id = request.get("id")
+            if request.get("jsonrpc") != "2.0" or not isinstance(request.get("method"), str):
+                raise ValueError((-32600, "Invalid Request", None))
+            mode, legacy_protocol = _request_mode(request, legacy_protocol)
             result = _handle(request, runner)
             if request_id is None:
                 continue
+            if mode == "modern":
+                result = _attach_server_info(result)
             response = {"jsonrpc": "2.0", "id": request_id, "result": result}
         except json.JSONDecodeError as exc:
-            if request_id is None:
-                continue
             response = {
-                "jsonrpc": "2.0", "id": request_id,
+                "jsonrpc": "2.0", "id": None,
                 "error": {"code": -32700, "message": "parse error: %s" % exc},
             }
-        except (KeyError, TypeError, ValueError) as exc:
+        except ValueError as exc:
+            if request_id is None and parsed_request:
+                continue
+            if exc.args and isinstance(exc.args[0], tuple):
+                code, message, data = exc.args[0]
+            else:
+                code, message, data = -32602, str(exc), None
+            response = {
+                "jsonrpc": "2.0", "id": request_id,
+                "error": _rpc_error(code, message, data),
+            }
+        except (KeyError, TypeError) as exc:
             if request_id is None:
                 continue
             response = {

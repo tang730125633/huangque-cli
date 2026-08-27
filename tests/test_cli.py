@@ -110,9 +110,9 @@ class HqCliTests(unittest.TestCase):
             self.assertTrue(agent["workflow"])
             self.assertTrue(agent["success_evidence"])
             self.assertTrue(agent["recovery"])
-            self.assertEqual(
-                set(capability["input_schema"].get("required") or []),
-                set(agent["required_inputs"]),
+            self.assertTrue(
+                set(capability["input_schema"].get("required") or [])
+                <= set(agent["required_inputs"]),
             )
 
     def test_ip12_resource_has_complete_crud_guidance(self):
@@ -132,6 +132,29 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("asset", asset["resource"])
         self.assertIn("asset-delete", asset["resource_operations"]["delete"])
         self.assertTrue(by_id["asset-delete"]["confirmation_required"])
+
+        digital_ip = by_id["digital-ip-project"]["agent"]["resource_operations"]
+        self.assertEqual({
+            "list": ["digital-ip-projects"],
+            "get": ["digital-ip-project", "digital-ip-report"],
+            "create": ["digital-ip-create"],
+            "update": ["digital-ip-update"],
+            "delete": ["digital-ip-delete"],
+        }, digital_ip)
+        self.assertEqual([], by_id["digital-ip-project"]["agent"]["missing_crud"])
+
+        leads = by_id["leads-delete"]["agent"]
+        self.assertEqual("lead", leads["resource"])
+        self.assertIn("leads-crm", leads["resource_operations"]["list"])
+        self.assertIn("leads-delete", leads["resource_operations"]["delete"])
+        self.assertTrue(any("先调用 leads-crm" in item for item in leads["workflow"]))
+
+        tryon_inputs = by_id["tryon-classic-generate"]["agent"]["required_inputs"]
+        clothes = tryon_inputs["clothes_upload_id"]
+        self.assertIn("image-upload", clothes)
+        self.assertNotIn("audio-upload", clothes)
+        self.assertIn("image-upload", tryon_inputs["background_upload_id"])
+        self.assertIn("video-upload", tryon_inputs["person_video_upload_id"])
         self.assertEqual("server_quote", by_id["image-generate"]["cost"]["kind"])
         self.assertEqual("hq_device_authorization", by_id["ip12-projects"]["target_auth"])
         self.assertEqual("assets:upload", by_id["image-upload"]["required_scope"])

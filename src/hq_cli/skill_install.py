@@ -17,9 +17,11 @@ from . import __version__
 
 
 SKILL_VERSION = "0.1.1"
+SKILL_COMMIT = "a24cc6301e0ba933838c80bf31be2b5a51e33113"
+MANIFEST_SHA256 = "6144587c761259bfffca853d134c6f91c500b1ef45fa68917439f358cc55f869"
 MANIFEST_URL = (
     "https://raw.githubusercontent.com/"
-    "tang730125633/huangque-agent-skill/v%s/manifest.json" % SKILL_VERSION
+    "tang730125633/huangque-agent-skill/%s/manifest.json" % SKILL_COMMIT
 )
 RAW_ROOT = (
     "https://raw.githubusercontent.com/"
@@ -70,9 +72,12 @@ def _version_tuple(value):
     return tuple(int(part) for part in value.split("."))
 
 
-def _validated_manifest(fetch):
+def _validated_manifest(fetch, expected_sha256):
     try:
-        manifest = json.loads(fetch(MANIFEST_URL, MAX_MANIFEST_BYTES).decode("utf-8"))
+        raw = fetch(MANIFEST_URL, MAX_MANIFEST_BYTES)
+        if hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise SkillInstallError("skill_hash_error", "Skill manifest SHA-256 verification failed")
+        manifest = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise SkillInstallError("skill_manifest_error", "invalid Skill manifest: %s" % exc)
     if not isinstance(manifest, dict) or manifest.get("schema") != "huangque.agent-skill/v1":
@@ -158,7 +163,7 @@ def _stage_skill(destination, manifest, fetch):
     try:
         for item in manifest["files"]:
             source = item["path"]
-            url = "%s/%s/%s" % (RAW_ROOT, manifest["source_ref"], source)
+            url = "%s/%s/%s" % (RAW_ROOT, SKILL_COMMIT, source)
             raw = fetch(url, MAX_SKILL_FILE_BYTES)
             if hashlib.sha256(raw).hexdigest() != item["sha256"]:
                 raise SkillInstallError("skill_hash_error", "Skill file SHA-256 verification failed", {"file": source})
@@ -190,8 +195,8 @@ def _backup_path(destination):
             return candidate
 
 
-def install_skill(target, replace=False, home=None, fetch=_download):
-    manifest = _validated_manifest(fetch)
+def install_skill(target, replace=False, home=None, fetch=_download, _manifest_sha256=MANIFEST_SHA256):
+    manifest = _validated_manifest(fetch, _manifest_sha256)
     version = manifest["skill"]["version"]
     if target == "mcp":
         minimum = manifest["adapters"]["mcp"]["minimum_cli"]
