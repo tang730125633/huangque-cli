@@ -39,6 +39,7 @@ LOGIN_SCOPES = [
     "generation:quote", "generation:submit",
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
     "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read", "short-drama:write",
+    "director:read", "director:generate",
 ]
 
 

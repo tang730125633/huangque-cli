@@ -299,6 +299,20 @@ JSON
 
 状态为 `ready` 后调用 `voices` 取得 `voice_key`，再用于 `audio-generate`。音频上传支持 MP3、WAV、M4A、AAC、OGG，最大 10 MiB、最长 300 秒；声音克隆会在服务端规范化最多 60 秒清晰语音。为避免供应商判断“有效语音太短”，克隆样音应包含 30–60 秒连续、清晰、单人说话，文件总时长不能代替有效语音时长。若状态为 `failed`，先读取原槽位错误；有效语音不足时上传新的合格样音，并使用新的 `audio_upload_id` 发起新操作。上传和克隆本身不扣点，使用已有音色生成语音仍须先报价再确认。
 
+## 编导工作流
+
+CLI 可以直接调用主站编导的 AI 脚本生成和公开链接拆解，不再只是打开 `/workbench/script`：
+
+```sh
+hq run director-capability --json
+hq describe director-script-generate --json
+hq describe director-breakdown --json
+```
+
+`director-script-generate` 接收 `prompt`，以及可选的 `style`、`duration`、`platform`；`director-breakdown` 接收一个 `url` 或最多五条 `urls`。两者都是付费异步动作，必须先报价，再以完全相同输入、`quote_token` 和 `--confirm` 提交一次。拿到 `job_id` 后只使用 `task` 轮询。
+
+本地图片和视频拆解暂不接受文件路径；只有实时契约把 `director-breakdown-upload` 标记为 `available` 后才能使用专用上传能力。
+
 ## 内容采集与获客
 
 CLI 可以直接执行采集页和获客页的核心动作，不必先打开网页：

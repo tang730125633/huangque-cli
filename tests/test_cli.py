@@ -36,6 +36,20 @@ class HqCliTests(unittest.TestCase):
     def authorize(self):
         client.save_credentials("t" * 43, 2000000000, cli.LOGIN_SCOPES)
 
+    def test_director_actions_are_direct_api_capabilities(self):
+        self.assertIn("director:read", cli.LOGIN_SCOPES)
+        self.assertIn("director:generate", cli.LOGIN_SCOPES)
+        capability = cli.CAPABILITIES["director-capability"]
+        self.assertEqual("api", capability["kind"])
+        self.assertEqual("director:read", capability["required_scope"])
+        for identifier in ("director-script-generate", "director-breakdown"):
+            with self.subTest(identifier=identifier):
+                capability = cli.CAPABILITIES[identifier]
+                self.assertEqual("api", capability["kind"])
+                self.assertEqual("paid", capability["side_effect"])
+                self.assertTrue(capability["confirmation_required"])
+                self.assertEqual("director:generate", capability["required_scope"])
+
     def test_help_version_and_discovery_are_json(self):
         for argv in ([], ["help"], ["-h"], ["version", "--help"], ["capabilities", "--json"]):
             code, output, error = self.invoke(argv)

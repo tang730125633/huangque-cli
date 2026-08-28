@@ -167,6 +167,9 @@ CAPABILITIES["channels"] = _api(
 CAPABILITIES["channels"]["next_actions"] = [
     "根据 access、capabilities、selector/selectors 选择可直接调用的能力；registered 表示已登记但尚无独立执行入口。",
 ]
+CAPABILITIES["director-capability"] = _api(
+    "director-capability", "编导能力契约", "director-capability",
+    "读取编导工作流、状态、权限、计费和当前可执行动作。", scope="director:read")
 CAPABILITIES["digital-ip-projects"] = _api(
     "digital-ip-projects", "数字化 IP 项目列表", "digital-ip-projects", "读取当前账号的数字化 IP 项目。",
     scope="ip12:read")
@@ -856,7 +859,21 @@ for identifier, name, fields, required in (
         {"kind": "server_quote", "unit": "points", "confirmation": "quote_token + --confirm"},
     )
 
+DIRECTOR_SCRIPT_FIELDS = {
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "style": {"type": "string", "enum": ["spoken", "story", "recommend"]},
+    "duration": {"type": "integer", "enum": [15, 30, 60]},
+    "platform": {"type": "string", "enum": ["douyin", "xiaohongshu", "channels"]},
+}
+DIRECTOR_BREAKDOWN_FIELDS = {
+    "url": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "urls": {"type": "array", "minItems": 1, "maxItems": 5,
+             "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+    "mode": {"type": "string", "enum": ["scenes", "reverse_prompt"]},
+}
 for identifier, name, fields, required in (
+    ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
+    ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
     ("collect-content", "采集内容与评论", {"url": COLLECT_URL}, ["url"]),
     ("collect-video", "采集原视频", {"url": COLLECT_URL}, ["url"]),
     ("collect-transcript", "提取口播文案", {"url": COLLECT_URL}, ["url"]),
@@ -873,9 +890,15 @@ for identifier, name, fields, required in (
         fields, required, "generation:quote", "paid", True,
         {"kind": "server_quote", "unit": "points", "confirmation": "quote_token + --confirm"},
     )
+    if identifier.startswith("director-"):
+        CAPABILITIES[identifier]["required_scope"] = "director:generate"
     CAPABILITIES[identifier]["next_actions"] = [
         "确认提交后只用 task 轮询返回的 job_id；不要重复提交相同任务。",
     ]
+
+CAPABILITIES["director-breakdown"]["input_schema"]["oneOf"] = [
+    {"required": ["url"]}, {"required": ["urls"]},
+]
 
 CAPABILITIES["leads-generate"]["input_schema"]["anyOf"] = [
     {"required": ["keyword"]}, {"required": ["channels_targets"]},
