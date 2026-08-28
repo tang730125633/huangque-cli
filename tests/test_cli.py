@@ -1251,6 +1251,11 @@ class HqCliTests(unittest.TestCase):
         rules = schema["x-hq-channel-rules"]
         self.assertEqual([4, 15], rules["micro"]["duration"])
         self.assertEqual([3, 10], rules["omni"]["duration"])
+        self.assertTrue(any(
+            "channel=omni accepts resolution=720p" in item
+            and "JPEG/PNG/WebP" in item
+            for item in video["constraints"]
+        ))
         self.assertEqual(["2k"], rules["minimax"]["resolutions"])
         self.assertIn("21:9", rules["minimax"]["ratios"])
         self.assertNotIn("3:2", rules["minimax"]["ratios"])
