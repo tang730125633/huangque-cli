@@ -42,13 +42,24 @@ class HqCliTests(unittest.TestCase):
         capability = cli.CAPABILITIES["director-capability"]
         self.assertEqual("api", capability["kind"])
         self.assertEqual("director:read", capability["required_scope"])
-        for identifier in ("director-script-generate", "director-breakdown"):
+        for identifier in (
+            "director-script-generate", "director-breakdown",
+            "director-scene-video-generate", "director-scene-talking-generate",
+        ):
             with self.subTest(identifier=identifier):
                 capability = cli.CAPABILITIES[identifier]
                 self.assertEqual("api", capability["kind"])
                 self.assertEqual("paid", capability["side_effect"])
                 self.assertTrue(capability["confirmation_required"])
                 self.assertEqual("director:generate", capability["required_scope"])
+        video = cli.CAPABILITIES["director-scene-video-generate"]
+        self.assertEqual(["scenes"], video["input_schema"]["required"])
+        self.assertEqual(8, video["input_schema"]["properties"]["scenes"]["maxItems"])
+        talking = cli.CAPABILITIES["director-scene-talking-generate"]
+        self.assertEqual(
+            ["scenes", "avatar_id", "voice"], talking["input_schema"]["required"],
+        )
+        self.assertNotIn("image_upload_id", talking["input_schema"]["properties"])
 
     def test_help_version_and_discovery_are_json(self):
         for argv in ([], ["help"], ["-h"], ["version", "--help"], ["capabilities", "--json"]):
