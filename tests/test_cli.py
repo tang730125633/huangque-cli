@@ -42,13 +42,22 @@ class HqCliTests(unittest.TestCase):
         capability = cli.CAPABILITIES["director-capability"]
         self.assertEqual("api", capability["kind"])
         self.assertEqual("director:read", capability["required_scope"])
-        for identifier in ("director-script-generate", "director-breakdown"):
+        for identifier in (
+            "director-script-generate", "director-breakdown",
+            "director-scene-image-generate",
+        ):
             with self.subTest(identifier=identifier):
                 capability = cli.CAPABILITIES[identifier]
                 self.assertEqual("api", capability["kind"])
                 self.assertEqual("paid", capability["side_effect"])
                 self.assertTrue(capability["confirmation_required"])
                 self.assertEqual("director:generate", capability["required_scope"])
+        upload = cli.CAPABILITIES["director-breakdown-upload"]
+        self.assertEqual("upload", upload["kind"])
+        self.assertEqual("paid", upload["side_effect"])
+        self.assertEqual("director:generate", upload["required_scope"])
+        self.assertNotIn("director-scene-video-generate", cli.CAPABILITIES)
+        self.assertNotIn("director-scene-talking-generate", cli.CAPABILITIES)
 
     def test_help_version_and_discovery_are_json(self):
         for argv in ([], ["help"], ["-h"], ["version", "--help"], ["capabilities", "--json"]):

@@ -535,7 +535,9 @@ def main(argv=None):
                 if not args.file:
                     raise CliError(EXIT_USAGE, "usage_error", "%s requires --file /absolute/path" % args.id)
                 credentials = _credentials()
-                if args.id == "video-upload":
+                if args.id == "director-breakdown-upload":
+                    upload_kind, uploader = "director breakdown", client.upload_director_breakdown
+                elif args.id == "video-upload":
                     upload_kind, uploader = "video", client.upload_video
                 elif args.id == "audio-upload":
                     upload_kind, uploader = "audio", client.upload_audio

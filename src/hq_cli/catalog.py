@@ -417,6 +417,28 @@ CAPABILITIES["audio-upload"]["constraints"] = [
 CAPABILITIES["audio-upload"]["next_actions"] = [
     "把返回的 result.upload_id 作为 audio_upload_id 写入 voice-clone-create 或 digital-ip-audio-generate。",
 ]
+CAPABILITIES["director-breakdown-upload"] = _upload(
+    "director-breakdown-upload", "编导本地素材反推",
+    "上传一张本地图片或一个本地视频，直接创建当前账号的付费提示词反推任务。",
+    "director:generate",
+)
+CAPABILITIES["director-breakdown-upload"]["file_input"] = {
+    "argument": "--file", "path": "absolute", "maxBytes": 200 * 1024 * 1024,
+    "mimeTypes": ["image/jpeg", "image/png", "image/webp",
+                  "video/mp4", "video/quicktime", "video/webm"],
+    "imageMaxBytes": 20 * 1024 * 1024, "videoMaxSeconds": 120,
+}
+CAPABILITIES["director-breakdown-upload"]["side_effect"] = "paid"
+CAPABILITIES["director-breakdown-upload"]["cost"] = {
+    "kind": "fixed_current", "unit": "points", "points_kind": "breakdown",
+}
+CAPABILITIES["director-breakdown-upload"]["constraints"] = [
+    "--confirm immediately uploads and charges the current breakdown price",
+    "images are limited to 20 MiB; videos are limited to 200 MiB and 120 seconds",
+]
+CAPABILITIES["director-breakdown-upload"]["next_actions"] = [
+    "保存返回的 job_id，并只用 task 轮询；响应不确定时不要重新上传。",
+]
 ASSET_MARK_FIELDS = {
     "kind": {"type": "string", "enum": ["image", "audio", "video", "avatar", "copy", "collect", "leads", "breakdown"]},
     "key": {"type": "string", "minLength": 1, "maxLength": 500},
@@ -871,9 +893,22 @@ DIRECTOR_BREAKDOWN_FIELDS = {
              "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
     "mode": {"type": "string", "enum": ["scenes", "reverse_prompt"]},
 }
+DIRECTOR_SCENE_IMAGE_FIELDS = {
+    "scenes": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "scene": {"type": "string", "maxLength": 2000},
+            "line": {"type": "string", "maxLength": 2000},
+            "dur": {"type": "number", "exclusiveMinimum": 0, "maximum": 180},
+        },
+    }},
+    "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1", "4:5", "5:4"]},
+    "quality": {"type": "string", "enum": ["standard", "hd"]},
+}
 for identifier, name, fields, required in (
     ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
     ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
+    ("director-scene-image-generate", "编导分镜图片生成", DIRECTOR_SCENE_IMAGE_FIELDS, ["scenes"]),
     ("collect-content", "采集内容与评论", {"url": COLLECT_URL}, ["url"]),
     ("collect-video", "采集原视频", {"url": COLLECT_URL}, ["url"]),
     ("collect-transcript", "提取口播文案", {"url": COLLECT_URL}, ["url"]),
@@ -898,6 +933,10 @@ for identifier, name, fields, required in (
 
 CAPABILITIES["director-breakdown"]["input_schema"]["oneOf"] = [
     {"required": ["url"]}, {"required": ["urls"]},
+]
+CAPABILITIES["director-scene-image-generate"]["constraints"] = [
+    "至少一个 scene 必须包含非空画面描述",
+    "先报价，再用完全相同的标准化输入确认一次",
 ]
 
 CAPABILITIES["leads-generate"]["input_schema"]["anyOf"] = [

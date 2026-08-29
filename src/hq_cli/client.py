@@ -30,6 +30,8 @@ MAX_AUDIO_UPLOAD_BYTES = 10 * 1024 * 1024
 IMAGE_UPLOAD_PATH = "/api/auth/cli/image-upload"
 VIDEO_UPLOAD_PATH = "/api/auth/cli/video-upload"
 AUDIO_UPLOAD_PATH = "/api/auth/cli/audio-upload"
+DIRECTOR_BREAKDOWN_IMAGE_PATH = "/api/auth/cli/director-breakdown-image"
+DIRECTOR_BREAKDOWN_VIDEO_PATH = "/api/auth/cli/director-breakdown-video"
 
 
 class NetworkError(Exception):
@@ -216,12 +218,36 @@ def _open_audio(path):
     )
 
 
+def _breakdown_mime(header):
+    return _image_mime(header) or _video_mime(header)
+
+
+def _open_director_breakdown(path):
+    descriptor, file_stat, mime, digest = _open_media(
+        path, 200 * 1024 * 1024, _breakdown_mime,
+        "director breakdown file must be between 1 byte and 200 MiB",
+        "director breakdown file must be PNG, JPG, WebP, MP4, MOV, or WebM",
+    )
+    if mime.startswith("image/") and file_stat.st_size > 20 * 1024 * 1024:
+        os.close(descriptor)
+        raise ValueError("director breakdown image must not exceed 20 MiB")
+    return descriptor, file_stat, mime, digest
+
+
 def _upload_media(path, token, upload_path, digest_header, opener, timeout):
     if not isinstance(token, str) or not token:
         raise ValueError("missing access token")
-    if upload_path not in {IMAGE_UPLOAD_PATH, VIDEO_UPLOAD_PATH, AUDIO_UPLOAD_PATH}:
-        raise ValueError("HQ CLI only uploads to fixed main-site endpoints")
     descriptor, file_stat, mime, digest = opener(path)
+    if isinstance(upload_path, dict):
+        upload_path = upload_path.get(mime)
+    if isinstance(digest_header, dict):
+        digest_header = digest_header.get(mime)
+    if upload_path not in {
+            IMAGE_UPLOAD_PATH, VIDEO_UPLOAD_PATH, AUDIO_UPLOAD_PATH,
+            DIRECTOR_BREAKDOWN_IMAGE_PATH, DIRECTOR_BREAKDOWN_VIDEO_PATH,
+    } or not digest_header:
+        os.close(descriptor)
+        raise ValueError("HQ CLI only uploads to fixed main-site endpoints")
     target = urllib.parse.urlsplit(API_BASE)
     if target.scheme != "https" or target.hostname != "huangquechuanmei.com" or target.path not in {"", "/"}:
         os.close(descriptor)
@@ -233,6 +259,8 @@ def _upload_media(path, token, upload_path, digest_header, opener, timeout):
         connection.putheader("Content-Type", mime)
         connection.putheader("Content-Length", str(file_stat.st_size))
         connection.putheader(digest_header, digest)
+        if upload_path in {DIRECTOR_BREAKDOWN_IMAGE_PATH, DIRECTOR_BREAKDOWN_VIDEO_PATH}:
+            connection.putheader("X-HQ-File-Name", urllib.parse.quote(os.path.basename(path), safe="._-"))
         connection.putheader("X-HQ-Confirm", "true")
         connection.putheader("Accept", "application/json")
         connection.putheader("User-Agent", "hq-cli/%s" % __version__)
@@ -283,6 +311,26 @@ def upload_video(path, token, timeout=120):
 def upload_audio(path, token, timeout=120):
     return _upload_media(
         path, token, AUDIO_UPLOAD_PATH, "X-HQ-Audio-SHA256", _open_audio, timeout,
+    )
+
+
+def upload_director_breakdown(path, token, timeout=180):
+    return _upload_media(
+        path, token,
+        {
+            "image/jpeg": DIRECTOR_BREAKDOWN_IMAGE_PATH,
+            "image/png": DIRECTOR_BREAKDOWN_IMAGE_PATH,
+            "image/webp": DIRECTOR_BREAKDOWN_IMAGE_PATH,
+            "video/mp4": DIRECTOR_BREAKDOWN_VIDEO_PATH,
+            "video/quicktime": DIRECTOR_BREAKDOWN_VIDEO_PATH,
+            "video/webm": DIRECTOR_BREAKDOWN_VIDEO_PATH,
+        },
+        {
+            "image/jpeg": "X-HQ-Image-SHA256", "image/png": "X-HQ-Image-SHA256",
+            "image/webp": "X-HQ-Image-SHA256", "video/mp4": "X-HQ-Video-SHA256",
+            "video/quicktime": "X-HQ-Video-SHA256", "video/webm": "X-HQ-Video-SHA256",
+        },
+        _open_director_breakdown, timeout,
     )
 
 

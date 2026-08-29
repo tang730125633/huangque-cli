@@ -307,11 +307,15 @@ CLI 可以直接调用主站编导的 AI 脚本生成和公开链接拆解，不
 hq run director-capability --json
 hq describe director-script-generate --json
 hq describe director-breakdown --json
+hq describe director-breakdown-upload --json
+hq describe director-scene-image-generate --json
 ```
 
-`director-script-generate` 接收 `prompt`，以及可选的 `style`、`duration`、`platform`；`director-breakdown` 接收一个 `url` 或最多五条 `urls`。两者都是付费异步动作，必须先报价，再以完全相同输入、`quote_token` 和 `--confirm` 提交一次。拿到 `job_id` 后只使用 `task` 轮询。
+`director-script-generate` 接收 `prompt`，以及可选的 `style`、`duration`、`platform`；`director-breakdown` 接收一个 `url` 或最多五条 `urls`。`director-scene-image-generate` 根据 1–8 个分镜的画面描述生成图片。这三个动作先报价，再以完全相同输入、`quote_token` 和 `--confirm` 提交一次。
 
-本地图片和视频拆解暂不接受文件路径；只有实时契约把 `director-breakdown-upload` 标记为 `available` 后才能使用专用上传能力。
+本地图片或视频反推使用 `hq run director-breakdown-upload --file <绝对路径> --confirm --json`。该专用上传会按主站当前拆解价格立即扣点，不经过通用素材上传，也不能用 `--input` 或 `quote_token`。拿到 `job_id` 后只使用 `task` 轮询。
+
+“一键生成视频”和“一键生成口播”不属于本次 CLI 更新范围，仍按实时契约显示为不可用。
 
 ## 内容采集与获客
 
