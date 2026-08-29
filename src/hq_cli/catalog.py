@@ -871,37 +871,9 @@ DIRECTOR_BREAKDOWN_FIELDS = {
              "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
     "mode": {"type": "string", "enum": ["scenes", "reverse_prompt"]},
 }
-DIRECTOR_SCENE_ITEM = {
-    "type": "object", "additionalProperties": False,
-    "properties": {
-        "scene": {"type": "string", "maxLength": 2000},
-        "line": {"type": "string", "maxLength": 2000},
-        "dur": {"type": "number", "exclusiveMinimum": 0, "maximum": 180},
-    },
-}
-DIRECTOR_SCENE_VIDEO_FIELDS = {
-    "scenes": {"type": "array", "minItems": 1, "maxItems": 8,
-               "items": DIRECTOR_SCENE_ITEM},
-    "duration": {"type": "integer", "minimum": 1, "maximum": 15},
-}
-DIRECTOR_SCENE_TALKING_FIELDS = {
-    "scenes": {"type": "array", "minItems": 1, "maxItems": 8,
-               "items": DIRECTOR_SCENE_ITEM},
-    "avatar_id": {"type": "integer", "minimum": 1},
-    "voice": {"type": "string", "minLength": 1, "maxLength": 128},
-    "style": {"type": "string", "enum": ["spoken", "recommend"]},
-    "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1", "4:5", "5:4"]},
-    "motion": {"type": "string", "enum": ["low", "medium", "high"]},
-    "subtitle": {"type": "boolean"},
-    "subtitle_style": {"type": "string", "enum": ["white", "variety", "bar"]},
-    "subtitle_position": {"type": "string", "enum": ["top", "upper", "center", "lower", "bottom"]},
-}
 for identifier, name, fields, required in (
     ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
     ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
-    ("director-scene-video-generate", "编导一键生成视频", DIRECTOR_SCENE_VIDEO_FIELDS, ["scenes"]),
-    ("director-scene-talking-generate", "编导一键生成口播", DIRECTOR_SCENE_TALKING_FIELDS,
-     ["scenes", "avatar_id", "voice"]),
     ("collect-content", "采集内容与评论", {"url": COLLECT_URL}, ["url"]),
     ("collect-video", "采集原视频", {"url": COLLECT_URL}, ["url"]),
     ("collect-transcript", "提取口播文案", {"url": COLLECT_URL}, ["url"]),
@@ -926,15 +898,6 @@ for identifier, name, fields, required in (
 
 CAPABILITIES["director-breakdown"]["input_schema"]["oneOf"] = [
     {"required": ["url"]}, {"required": ["urls"]},
-]
-CAPABILITIES["director-scene-video-generate"]["constraints"] = [
-    "至少一个 scene 必须包含非空场景描述；该动作不会上传图片",
-    "先报价，再用完全相同的标准化输入确认一次",
-]
-CAPABILITIES["director-scene-talking-generate"]["constraints"] = [
-    "至少一个 scene 必须包含非空口播 line；该动作不会上传图片",
-    "avatar_id 来自 video-avatars，voice 来自 voices",
-    "先报价，再用完全相同的标准化输入确认一次",
 ]
 
 CAPABILITIES["leads-generate"]["input_schema"]["anyOf"] = [
