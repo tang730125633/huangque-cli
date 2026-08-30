@@ -807,6 +807,11 @@ TRYON_CLASSIC_FIELDS = {
     "background_upload_id": IMAGE_UPLOAD_ID,
     "seconds": {"type": "integer", "minimum": 1, "maximum": 6},
 }
+AVATAR_CREATE_FIELDS = {
+    "image_data": {"type": "string", "minLength": 32, "maxLength": 12 * 1024 * 1024,
+                   "description": "本人真人照片的 data URL（jpg/png/webp，正脸清晰、光线充足）"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 40},
+}
 
 TEXT_VIDEO_AVATAR_ID = {"type": "string", "pattern": "^local_avatar_[0-9a-f]{32}$"}
 TEXT_VIDEO_PLAN_ID = {"type": "string", "pattern": "^talking_plan_[0-9a-f]{32}$"}
@@ -873,6 +878,8 @@ for identifier, name, fields, required in (
      ["person_image_upload_id", "clothes_upload_id"]),
     ("tryon-classic-generate", "经典换装", TRYON_CLASSIC_FIELDS,
      ["person_video_upload_id"]),
+    ("video-avatar-create", "创建数字人形象", AVATAR_CREATE_FIELDS,
+     ["image_data"]),
 ):
     CAPABILITIES[identifier] = _api(
         identifier, name, identifier,
@@ -905,6 +912,16 @@ DIRECTOR_SCENE_IMAGE_FIELDS = {
     "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1", "4:5", "5:4"]},
     "quality": {"type": "string", "enum": ["standard", "hd"]},
 }
+CAPABILITIES["video-avatar-create"]["constraints"] = [
+    "image_data must be a jpg/png/webp data URL of the account holder's own portrait with a clear frontal face and good lighting",
+    "creation costs points per avatar.create; a quote is returned first and points are deducted only after --confirm",
+    "creations without a detectable face fail fast with a human-readable message; no points are deducted on failure",
+]
+CAPABILITIES["video-avatar-create"]["next_actions"] = [
+    "提交后轮询 video-avatars 直到新形象 status 变为 ready（约 30 秒）。",
+    "若提示未检测到人脸，换一张正脸清晰、光线充足的照片重新提交。",
+]
+
 for identifier, name, fields, required in (
     ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
     ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
@@ -1017,6 +1034,7 @@ CAPABILITIES["video-generate"]["input_schema"]["x-hq-channel-rules"] = VIDEO_CHA
 
 CAPABILITIES["video-generate"]["constraints"] = [
     "reference_upload_ids limits: grok=7, micro=9, omni=6, minimax=5",
+    "channel=omni accepts resolution=720p, duration=3-10, ratio=9:16|16:9, and up to 6 JPEG/PNG/WebP references from image-upload",
     "channel=minimax accepts only resolution=2k for new tasks",
     "resolution=2k is only valid when channel=minimax",
     "channel-specific ratio, duration/seconds, resolution, model, and reference rules are machine-readable in input_schema.allOf",
