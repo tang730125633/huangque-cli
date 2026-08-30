@@ -167,6 +167,9 @@ CAPABILITIES["channels"] = _api(
 CAPABILITIES["channels"]["next_actions"] = [
     "根据 access、capabilities、selector/selectors 选择可直接调用的能力；registered 表示已登记但尚无独立执行入口。",
 ]
+CAPABILITIES["director-capability"] = _api(
+    "director-capability", "编导能力契约", "director-capability",
+    "读取编导工作流、状态、权限、计费和当前可执行动作。", scope="director:read")
 CAPABILITIES["digital-ip-projects"] = _api(
     "digital-ip-projects", "数字化 IP 项目列表", "digital-ip-projects", "读取当前账号的数字化 IP 项目。",
     scope="ip12:read")
@@ -413,6 +416,39 @@ CAPABILITIES["audio-upload"]["constraints"] = [
 ]
 CAPABILITIES["audio-upload"]["next_actions"] = [
     "把返回的 result.upload_id 作为 audio_upload_id 写入 voice-clone-create 或 digital-ip-audio-generate。",
+]
+CAPABILITIES["director-breakdown-upload"] = _upload(
+    "director-breakdown-upload", "编导本地素材反推",
+    "上传一张本地图片或一个本地视频，直接创建当前账号的付费提示词反推任务。",
+    "director:generate",
+)
+CAPABILITIES["director-breakdown-upload"]["file_input"] = {
+    "argument": "--file", "path": "absolute", "maxBytes": 200 * 1024 * 1024,
+    "mimeTypes": ["image/jpeg", "image/png", "image/webp",
+                  "video/mp4", "video/quicktime", "video/webm"],
+    "imageMaxBytes": 20 * 1024 * 1024, "videoMaxSeconds": 120,
+}
+CAPABILITIES["director-breakdown-upload"]["side_effect"] = "paid"
+CAPABILITIES["director-breakdown-upload"]["cost"] = {
+    "kind": "server_quote", "unit": "points", "points_kind": "breakdown",
+    "confirmation": "quote_token + --confirm + --expected-cost",
+}
+CAPABILITIES["director-breakdown-upload"]["transport"] = {
+    "kind": "dedicated_upload",
+    "quote_path": "/api/auth/cli/director-breakdown-quote",
+    "quote_token_header": "X-HQ-Quote-Token",
+    "expected_cost_header": "X-HQ-Expected-Cost",
+    "idempotency_header": "Idempotency-Key",
+}
+CAPABILITIES["director-breakdown-upload"]["constraints"] = [
+    "the unconfirmed call hashes the selected file locally and returns a server quote without uploading it",
+    "confirmation must reuse the same file and quote_token and include --expected-cost from that quote",
+    "the Idempotency-Key is stable for retries with the same quote_token",
+    "images are limited to 20 MiB; videos are limited to 200 MiB and 120 seconds",
+]
+CAPABILITIES["director-breakdown-upload"]["next_actions"] = [
+    "报价后审核 cost；确认时复用同一文件、quote_token 和 expected-cost。",
+    "保存返回的 job_id 并只用 task 轮询；响应不确定时复用原 quote_token 重试，禁止重新报价。",
 ]
 ASSET_MARK_FIELDS = {
     "kind": {"type": "string", "enum": ["image", "audio", "video", "avatar", "copy", "collect", "leads", "breakdown"]},
@@ -863,6 +899,30 @@ for identifier, name, fields, required in (
         {"kind": "server_quote", "unit": "points", "confirmation": "quote_token + --confirm"},
     )
 
+DIRECTOR_SCRIPT_FIELDS = {
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "style": {"type": "string", "enum": ["spoken", "story", "recommend"]},
+    "duration": {"type": "integer", "enum": [15, 30, 60]},
+    "platform": {"type": "string", "enum": ["douyin", "xiaohongshu", "channels"]},
+}
+DIRECTOR_BREAKDOWN_FIELDS = {
+    "url": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "urls": {"type": "array", "minItems": 1, "maxItems": 5,
+             "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+    "mode": {"type": "string", "enum": ["scenes", "reverse_prompt"]},
+}
+DIRECTOR_SCENE_IMAGE_FIELDS = {
+    "scenes": {"type": "array", "minItems": 1, "maxItems": 8, "items": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "scene": {"type": "string", "maxLength": 2000},
+            "line": {"type": "string", "maxLength": 2000},
+            "dur": {"type": "number", "exclusiveMinimum": 0, "maximum": 180},
+        },
+    }},
+    "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1", "4:5", "5:4"]},
+    "quality": {"type": "string", "enum": ["standard", "hd"]},
+}
 CAPABILITIES["video-avatar-create"]["constraints"] = [
     "image_data must be a jpg/png/webp data URL of the account holder's own portrait with a clear frontal face and good lighting",
     "creation costs points per avatar.create; a quote is returned first and points are deducted only after --confirm",
@@ -874,6 +934,9 @@ CAPABILITIES["video-avatar-create"]["next_actions"] = [
 ]
 
 for identifier, name, fields, required in (
+    ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
+    ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
+    ("director-scene-image-generate", "编导分镜图片生成", DIRECTOR_SCENE_IMAGE_FIELDS, ["scenes"]),
     ("collect-content", "采集内容与评论", {"url": COLLECT_URL}, ["url"]),
     ("collect-video", "采集原视频", {"url": COLLECT_URL}, ["url"]),
     ("collect-transcript", "提取口播文案", {"url": COLLECT_URL}, ["url"]),
@@ -890,9 +953,19 @@ for identifier, name, fields, required in (
         fields, required, "generation:quote", "paid", True,
         {"kind": "server_quote", "unit": "points", "confirmation": "quote_token + --confirm"},
     )
+    if identifier.startswith("director-"):
+        CAPABILITIES[identifier]["required_scope"] = "director:generate"
     CAPABILITIES[identifier]["next_actions"] = [
         "确认提交后只用 task 轮询返回的 job_id；不要重复提交相同任务。",
     ]
+
+CAPABILITIES["director-breakdown"]["input_schema"]["oneOf"] = [
+    {"required": ["url"]}, {"required": ["urls"]},
+]
+CAPABILITIES["director-scene-image-generate"]["constraints"] = [
+    "至少一个 scene 必须包含非空画面描述",
+    "先报价，再用完全相同的标准化输入确认一次",
+]
 
 CAPABILITIES["leads-generate"]["input_schema"]["anyOf"] = [
     {"required": ["keyword"]}, {"required": ["channels_targets"]},

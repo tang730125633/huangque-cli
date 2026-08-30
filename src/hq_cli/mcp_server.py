@@ -110,8 +110,23 @@ def _capability_schema(capability):
             "type": "string",
             "description": "One explicit absolute local file path accepted by this upload capability.",
         }
-        properties["confirm"] = {"type": "boolean", "const": True}
-        required.extend(["file", "confirm"])
+        if capability["side_effect"] == "paid":
+            properties["confirm"] = {
+                "type": "boolean", "default": False,
+                "description": "Leave false to obtain a file-bound quote; set true only after explicit user approval.",
+            }
+            properties["quote_token"] = {
+                "type": "string", "minLength": 1,
+                "description": "Server quote token returned for this exact file.",
+            }
+            properties["expected_cost"] = {
+                "type": "integer", "minimum": 0,
+                "description": "Quoted point cost explicitly approved by the user.",
+            }
+            required.append("file")
+        else:
+            properties["confirm"] = {"type": "boolean", "const": True}
+            required.extend(["file", "confirm"])
     elif capability["kind"] == "navigation":
         properties["open_browser"] = {
             "type": "boolean",
@@ -221,6 +236,7 @@ def _capability_command(capability, arguments):
     values = dict(arguments)
     confirm = values.pop("confirm", False)
     quote_token = values.pop("quote_token", None)
+    expected_cost = values.pop("expected_cost", None)
     file_path = values.pop("file", None)
     open_browser = values.pop("open_browser", False)
     if not isinstance(confirm, bool):
@@ -248,6 +264,10 @@ def _capability_command(capability, arguments):
         if not isinstance(quote_token, str) or not quote_token:
             raise ValueError("quote_token must be a non-empty string")
         command.extend(["--quote-token", quote_token])
+    if expected_cost is not None:
+        if isinstance(expected_cost, bool) or not isinstance(expected_cost, int) or expected_cost < 0:
+            raise ValueError("expected_cost must be a non-negative integer")
+        command.extend(["--expected-cost", str(expected_cost)])
     return command, stdin_text
 
 
