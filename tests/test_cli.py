@@ -66,6 +66,22 @@ class HqCliTests(unittest.TestCase):
         self.assertNotIn("director-scene-video-generate", cli.CAPABILITIES)
         self.assertNotIn("director-scene-talking-generate", cli.CAPABILITIES)
 
+    def test_director_upload_describe_is_quote_first_without_changing_free_uploads(self):
+        code, output, error = self.invoke(["describe", "director-breakdown-upload", "--json"])
+        self.assertEqual(0, code, error)
+        next_action = self.payload(output)["next_actions"][0]
+        self.assertIn(
+            "hq run director-breakdown-upload --file /absolute/path --json",
+            next_action,
+        )
+        self.assertNotIn("--confirm", next_action)
+
+        for identifier in ("image-upload", "video-upload", "audio-upload"):
+            with self.subTest(identifier=identifier):
+                code, output, error = self.invoke(["describe", identifier, "--json"])
+                self.assertEqual(0, code, error)
+                self.assertIn("--confirm", self.payload(output)["next_actions"][0])
+
     def test_help_version_and_discovery_are_json(self):
         for argv in ([], ["help"], ["-h"], ["version", "--help"], ["capabilities", "--json"]):
             code, output, error = self.invoke(argv)
