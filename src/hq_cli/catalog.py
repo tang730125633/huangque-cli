@@ -972,6 +972,7 @@ CAPABILITIES["video-generate"]["input_schema"]["x-hq-channel-rules"] = VIDEO_CHA
 
 CAPABILITIES["video-generate"]["constraints"] = [
     "reference_upload_ids limits: grok=7, micro=9, omni=6, minimax=5",
+    "channel=omni accepts resolution=720p, duration=3-10, ratio=9:16|16:9, and up to 6 JPEG/PNG/WebP references from image-upload",
     "channel=minimax accepts only resolution=2k for new tasks",
     "resolution=2k is only valid when channel=minimax",
     "channel-specific ratio, duration/seconds, resolution, model, and reference rules are machine-readable in input_schema.allOf",
