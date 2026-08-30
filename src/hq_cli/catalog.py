@@ -430,14 +430,25 @@ CAPABILITIES["director-breakdown-upload"]["file_input"] = {
 }
 CAPABILITIES["director-breakdown-upload"]["side_effect"] = "paid"
 CAPABILITIES["director-breakdown-upload"]["cost"] = {
-    "kind": "fixed_current", "unit": "points", "points_kind": "breakdown",
+    "kind": "server_quote", "unit": "points", "points_kind": "breakdown",
+    "confirmation": "quote_token + --confirm + --expected-cost",
+}
+CAPABILITIES["director-breakdown-upload"]["transport"] = {
+    "kind": "dedicated_upload",
+    "quote_path": "/api/auth/cli/director-breakdown-quote",
+    "quote_token_header": "X-HQ-Quote-Token",
+    "expected_cost_header": "X-HQ-Expected-Cost",
+    "idempotency_header": "Idempotency-Key",
 }
 CAPABILITIES["director-breakdown-upload"]["constraints"] = [
-    "--confirm immediately uploads and charges the current breakdown price",
+    "the unconfirmed call hashes the selected file locally and returns a server quote without uploading it",
+    "confirmation must reuse the same file and quote_token and include --expected-cost from that quote",
+    "the Idempotency-Key is stable for retries with the same quote_token",
     "images are limited to 20 MiB; videos are limited to 200 MiB and 120 seconds",
 ]
 CAPABILITIES["director-breakdown-upload"]["next_actions"] = [
-    "保存返回的 job_id，并只用 task 轮询；响应不确定时不要重新上传。",
+    "报价后审核 cost；确认时复用同一文件、quote_token 和 expected-cost。",
+    "保存返回的 job_id 并只用 task 轮询；响应不确定时复用原 quote_token 重试，禁止重新报价。",
 ]
 ASSET_MARK_FIELDS = {
     "kind": {"type": "string", "enum": ["image", "audio", "video", "avatar", "copy", "collect", "leads", "breakdown"]},

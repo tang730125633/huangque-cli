@@ -343,7 +343,20 @@ hq describe director-scene-image-generate --json
 
 `director-script-generate` 接收 `prompt`，以及可选的 `style`、`duration`、`platform`；`director-breakdown` 接收一个 `url` 或最多五条 `urls`。`director-scene-image-generate` 根据 1–8 个分镜的画面描述生成图片。这三个动作先报价，再以完全相同输入、`quote_token` 和 `--confirm` 提交一次。
 
-本地图片或视频反推使用 `hq run director-breakdown-upload --file <绝对路径> --confirm --json`。该专用上传会按主站当前拆解价格立即扣点，不经过通用素材上传，也不能用 `--input` 或 `quote_token`。拿到 `job_id` 后只使用 `task` 轮询。
+本地图片或视频反推必须先报价，首次调用只在本地校验文件并计算 SHA-256，不上传文件：
+
+```sh
+hq run director-breakdown-upload --file <绝对路径> --json
+```
+
+审核返回的 `cost` 后，复用同一文件和 `quote_token`，并把该费用作为 `--expected-cost` 明确确认：
+
+```sh
+hq run director-breakdown-upload --file <绝对路径> --confirm \
+  --quote-token <quote_token> --expected-cost <cost> --json
+```
+
+CLI 会为同一 `quote_token` 生成稳定的 `Idempotency-Key`。若上传响应不确定，必须用同一文件、同一报价令牌和同一费用重试；不要重新报价。拿到 `job_id` 后只使用 `task` 轮询。
 
 “一键生成视频”和“一键生成口播”不属于本次 CLI 更新范围，仍按实时契约显示为不可用。
 

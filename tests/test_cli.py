@@ -56,6 +56,13 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("upload", upload["kind"])
         self.assertEqual("paid", upload["side_effect"])
         self.assertEqual("director:generate", upload["required_scope"])
+        self.assertEqual({
+            "kind": "dedicated_upload",
+            "quote_path": "/api/auth/cli/director-breakdown-quote",
+            "quote_token_header": "X-HQ-Quote-Token",
+            "expected_cost_header": "X-HQ-Expected-Cost",
+            "idempotency_header": "Idempotency-Key",
+        }, upload["transport"])
         self.assertNotIn("director-scene-video-generate", cli.CAPABILITIES)
         self.assertNotIn("director-scene-talking-generate", cli.CAPABILITIES)
 
@@ -1022,6 +1029,141 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(0, code, error)
         self.assertEqual("aud_" + "a" * 32, self.payload(output)["result"]["upload_id"])
         upload.assert_called_once_with(audio_path, "t" * 43)
+
+    def test_director_breakdown_upload_quotes_then_confirms_the_same_file_and_cost(self):
+        self.authorize()
+        source_path = os.path.join(self.temp.name, "director-reference.png")
+        quote = {
+            "quote_token": "q.director.upload", "kind": "breakdown_upload",
+            "media_type": "image", "sha256": "b" * 64,
+            "cost": 20, "points": 100, "confirmation_required": True,
+        }
+        with patch.object(client, "quote_director_breakdown", return_value=(200, quote)) as quote_call, \
+                patch.object(client, "upload_director_breakdown") as upload:
+            code, output, error = self.invoke([
+                "run", "director-breakdown-upload", "--file", source_path, "--json",
+            ])
+            self.assertEqual(0, code, error)
+            self.assertEqual(20, self.payload(output)["result"]["cost"])
+            self.assertIn("--expected-cost <cost>", self.payload(output)["next_actions"][0])
+            quote_call.assert_called_once_with(source_path, "t" * 43)
+            upload.assert_not_called()
+
+            for arguments, expected_error in (
+                (["--confirm", "--expected-cost", "20"], "quote_required"),
+                (["--confirm", "--quote-token", quote["quote_token"]], "expected_cost_required"),
+                (["--confirm", "--quote-token", quote["quote_token"], "--expected-cost", "-1"],
+                 "expected_cost_required"),
+            ):
+                with self.subTest(arguments=arguments):
+                    code, _, error = self.invoke([
+                        "run", "director-breakdown-upload", "--file", source_path, *arguments,
+                    ])
+                    self.assertEqual(cli.EXIT_CONFIRMATION, code)
+                    self.assertEqual(expected_error, self.payload(error)["error"])
+            upload.assert_not_called()
+
+            upload.return_value = (200, {
+                "job_id": 42, "cost": 20, "sha256": "b" * 64,
+            })
+            code, output, error = self.invoke([
+                "run", "director-breakdown-upload", "--file", source_path,
+                "--confirm", "--quote-token", quote["quote_token"],
+                "--expected-cost", "20", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual(42, self.payload(output)["result"]["job_id"])
+        upload.assert_called_once_with(source_path, "t" * 43, quote["quote_token"], 20)
+
+    def test_director_breakdown_quote_and_upload_bind_digest_quote_cost_and_idempotency(self):
+        raw = b"\x89PNG\r\n\x1a\n" + b"director-private-image"
+        image_path = Path(self.temp.name) / "director-reference.png"
+        image_path.write_bytes(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+        quote = {
+            "quote_token": "q.director.upload", "media_type": "image",
+            "sha256": digest, "cost": 20,
+        }
+        with patch.object(client, "request_json", return_value=(200, quote)) as request:
+            status, payload = client.quote_director_breakdown(str(image_path), "t" * 43)
+        self.assertEqual((200, quote), (status, payload))
+        request.assert_called_once_with(
+            client.DIRECTOR_BREAKDOWN_QUOTE_PATH, method="POST",
+            body={"media_type": "image", "sha256": digest},
+            token="t" * 43, timeout=30,
+        )
+        with patch.object(client, "request_json", return_value=(200, {
+                **quote, "sha256": "c" * 64,
+        })):
+            with self.assertRaises(client.NetworkError):
+                client.quote_director_breakdown(str(image_path), "t" * 43)
+
+        class Response:
+            status = 200
+
+            def __init__(self, response_digest):
+                self.response_digest = response_digest
+
+            def read(self, _limit):
+                return json.dumps({"job_id": 42, "sha256": self.response_digest}).encode()
+
+        class Connection:
+            def __init__(self):
+                self.headers, self.sent = {}, bytearray()
+
+            def putrequest(self, method, path, **_kwargs):
+                self.method, self.path = method, path
+
+            def putheader(self, key, value):
+                self.headers[key] = value
+
+            def endheaders(self):
+                pass
+
+            def send(self, chunk):
+                self.sent.extend(chunk)
+
+            def getresponse(self):
+                return Response(hashlib.sha256(bytes(self.sent)).hexdigest())
+
+            def close(self):
+                pass
+
+        connections = []
+
+        def connect(*_args, **_kwargs):
+            connection = Connection()
+            connections.append(connection)
+            return connection
+
+        with patch.object(client.http.client, "HTTPSConnection", side_effect=connect):
+            for token in (quote["quote_token"], quote["quote_token"], "q.director.other"):
+                status, payload = client.upload_director_breakdown(
+                    str(image_path), "t" * 43, token, 20,
+                )
+                self.assertEqual((200, 42), (status, payload["job_id"]))
+        first, replay, other = connections
+        self.assertEqual(client.DIRECTOR_BREAKDOWN_IMAGE_PATH, first.path)
+        self.assertEqual(raw, bytes(first.sent))
+        self.assertEqual(digest, first.headers["X-HQ-Image-SHA256"])
+        self.assertEqual(quote["quote_token"], first.headers["X-HQ-Quote-Token"])
+        self.assertEqual("20", first.headers["X-HQ-Expected-Cost"])
+        self.assertRegex(first.headers["Idempotency-Key"], r"^hqcli-du-[0-9a-f]{32}$")
+        self.assertEqual(first.headers["Idempotency-Key"], replay.headers["Idempotency-Key"])
+        self.assertNotEqual(first.headers["Idempotency-Key"], other.headers["Idempotency-Key"])
+        self.assertNotIn(str(image_path), json.dumps(first.headers))
+
+        video_raw = b"\x00\x00\x00\x18ftypisom" + b"director-private-video"
+        video_path = Path(self.temp.name) / "director-reference.mp4"
+        video_path.write_bytes(video_raw)
+        with patch.object(client.http.client, "HTTPSConnection", side_effect=connect):
+            status, payload = client.upload_director_breakdown(
+                str(video_path), "t" * 43, quote["quote_token"], 20,
+            )
+        video = connections[-1]
+        self.assertEqual((200, 42), (status, payload["job_id"]))
+        self.assertEqual(client.DIRECTOR_BREAKDOWN_VIDEO_PATH, video.path)
+        self.assertEqual(hashlib.sha256(video_raw).hexdigest(), video.headers["X-HQ-Video-SHA256"])
 
     def test_streaming_image_client_sends_no_local_path_or_filename(self):
         raw = b"\x89PNG\r\n\x1a\n" + b"private-image"

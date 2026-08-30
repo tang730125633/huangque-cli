@@ -32,6 +32,8 @@ VIDEO_UPLOAD_PATH = "/api/auth/cli/video-upload"
 AUDIO_UPLOAD_PATH = "/api/auth/cli/audio-upload"
 DIRECTOR_BREAKDOWN_IMAGE_PATH = "/api/auth/cli/director-breakdown-image"
 DIRECTOR_BREAKDOWN_VIDEO_PATH = "/api/auth/cli/director-breakdown-video"
+DIRECTOR_BREAKDOWN_QUOTE_PATH = "/api/auth/cli/director-breakdown-quote"
+ALLOWED_PATHS.add(DIRECTOR_BREAKDOWN_QUOTE_PATH)
 
 
 class NetworkError(Exception):
@@ -234,7 +236,30 @@ def _open_director_breakdown(path):
     return descriptor, file_stat, mime, digest
 
 
-def _upload_media(path, token, upload_path, digest_header, opener, timeout):
+def inspect_director_breakdown(path):
+    descriptor, _file_stat, mime, digest = _open_director_breakdown(path)
+    os.close(descriptor)
+    return {
+        "media_type": "image" if mime.startswith("image/") else "video",
+        "sha256": digest,
+    }
+
+
+def quote_director_breakdown(path, token, timeout=30):
+    descriptor = inspect_director_breakdown(path)
+    status, payload = request_json(
+        DIRECTOR_BREAKDOWN_QUOTE_PATH, method="POST", body=descriptor,
+        token=token, timeout=timeout,
+    )
+    if 200 <= int(status) < 300:
+        if (not isinstance(payload, dict)
+                or payload.get("media_type") != descriptor["media_type"]
+                or payload.get("sha256") != descriptor["sha256"]):
+            raise NetworkError("server quote does not match the selected file")
+    return status, payload
+
+
+def _upload_media(path, token, upload_path, digest_header, opener, timeout, extra_headers=None):
     if not isinstance(token, str) or not token:
         raise ValueError("missing access token")
     descriptor, file_stat, mime, digest = opener(path)
@@ -252,6 +277,12 @@ def _upload_media(path, token, upload_path, digest_header, opener, timeout):
     if target.scheme != "https" or target.hostname != "huangquechuanmei.com" or target.path not in {"", "/"}:
         os.close(descriptor)
         raise ValueError("HQ CLI only uploads to the fixed main-site origin")
+    director_upload = upload_path in {
+        DIRECTOR_BREAKDOWN_IMAGE_PATH, DIRECTOR_BREAKDOWN_VIDEO_PATH,
+    }
+    if bool(extra_headers) != director_upload:
+        os.close(descriptor)
+        raise ValueError("paid upload metadata is only valid for Director breakdown uploads")
     connection = http.client.HTTPSConnection(target.hostname, target.port or 443, timeout=timeout)
     try:
         connection.putrequest("POST", upload_path, skip_accept_encoding=True)
@@ -259,8 +290,10 @@ def _upload_media(path, token, upload_path, digest_header, opener, timeout):
         connection.putheader("Content-Type", mime)
         connection.putheader("Content-Length", str(file_stat.st_size))
         connection.putheader(digest_header, digest)
-        if upload_path in {DIRECTOR_BREAKDOWN_IMAGE_PATH, DIRECTOR_BREAKDOWN_VIDEO_PATH}:
+        if director_upload:
             connection.putheader("X-HQ-File-Name", urllib.parse.quote(os.path.basename(path), safe="._-"))
+            for key in ("X-HQ-Quote-Token", "X-HQ-Expected-Cost", "Idempotency-Key"):
+                connection.putheader(key, extra_headers[key])
         connection.putheader("X-HQ-Confirm", "true")
         connection.putheader("Accept", "application/json")
         connection.putheader("User-Agent", "hq-cli/%s" % __version__)
@@ -314,7 +347,17 @@ def upload_audio(path, token, timeout=120):
     )
 
 
-def upload_director_breakdown(path, token, timeout=180):
+def upload_director_breakdown(path, token, quote_token, expected_cost, timeout=180):
+    if (not isinstance(quote_token, str) or not 1 <= len(quote_token) <= 4096
+            or "\r" in quote_token or "\n" in quote_token):
+        raise ValueError("Director breakdown upload requires a valid quote token")
+    try:
+        quote_token.encode("ascii")
+    except UnicodeEncodeError:
+        raise ValueError("Director breakdown upload requires a valid quote token")
+    if isinstance(expected_cost, bool) or not isinstance(expected_cost, int) or expected_cost < 0:
+        raise ValueError("Director breakdown upload requires a non-negative expected cost")
+    idempotency_key = "hqcli-du-" + hashlib.sha256(quote_token.encode("utf-8")).hexdigest()[:32]
     return _upload_media(
         path, token,
         {
@@ -331,6 +374,11 @@ def upload_director_breakdown(path, token, timeout=180):
             "video/quicktime": "X-HQ-Video-SHA256", "video/webm": "X-HQ-Video-SHA256",
         },
         _open_director_breakdown, timeout,
+        {
+            "X-HQ-Quote-Token": quote_token,
+            "X-HQ-Expected-Cost": str(expected_cost),
+            "Idempotency-Key": idempotency_key,
+        },
     )
 
 
