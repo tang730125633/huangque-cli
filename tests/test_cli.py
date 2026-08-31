@@ -88,7 +88,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.13.3", self.payload(output)["cli_version"])
+        self.assertEqual("0.13.4", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -335,6 +335,14 @@ class HqCliTests(unittest.TestCase):
         self.assertTrue(re.match(collect_url["pattern"], "https://xiaohongshu.com:443/explore/123"))
         self.assertFalse(re.match(collect_url["pattern"], "https://douyin.com:8080/video"))
         self.assertTrue(re.match(collect_url["pattern"], "https://www.xiaohongshu.com/explore/123"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://weixin.qq.com/sph/Abc123"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://www.bilibili.com/video/BV1EbdbBHEPa"))
+        self.assertTrue(re.match(collect_url["pattern"], "https://b23.tv/keSUqLz"))
+        self.assertFalse(re.match(collect_url["pattern"], "https://x.com/CrazyKaomei/status/2093502767776366755"))
+        content_url = by_id["collect-content"]["input_schema"]["properties"]["url"]
+        self.assertTrue(re.match(content_url["pattern"], "https://x.com/CrazyKaomei/status/2093502767776366755?s=20"))
+        self.assertTrue(re.match(content_url["pattern"], "https://twitter.com/CrazyKaomei/status/2093502767776366755"))
+        self.assertFalse(re.match(content_url["pattern"], "https://x.com.evil.example/status/2093502767776366755"))
         self.assertFalse(re.match(collect_url["pattern"], "https://example.com/video"))
         search = by_id["collect-search"]["input_schema"]
         self.assertEqual(["douyin", "xhs"], search["properties"]["platform"]["enum"])
