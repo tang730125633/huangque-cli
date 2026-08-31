@@ -170,6 +170,76 @@ CAPABILITIES["channels"]["next_actions"] = [
 CAPABILITIES["director-capability"] = _api(
     "director-capability", "编导能力契约", "director-capability",
     "读取编导工作流、状态、权限、计费和当前可执行动作。", scope="director:read")
+
+DH_RUN_ID = {"type": "string", "pattern": "^dh-run-[A-Za-z0-9._:-]{8,128}$"}
+DH_REQUEST_ID = {"type": "string", "pattern": "^[A-Za-z0-9._:-]{8,128}$"}
+DH_UPLOAD_ID = {"type": "string", "pattern": "^img_[0-9a-f]{32}$"}
+DH_AUDIO_UPLOAD_ID = {"type": "string", "pattern": "^dha_[0-9a-f]{32}$"}
+DH_PLAN_FIELDS = {
+    "script": {"type": "string", "minLength": 12, "maxLength": 6000},
+    "narration_mode": {"type": "string", "enum": ["text", "audio"]},
+    "audio_upload_id": DH_AUDIO_UPLOAD_ID,
+    "allow_ai_materials": {"type": "boolean"},
+    "customer_upload_ids": {"type": "array", "maxItems": 12, "uniqueItems": True,
+                            "items": DH_UPLOAD_ID},
+}
+CAPABILITIES["digital-human-oneclick-capability"] = _api(
+    "digital-human-oneclick-capability", "数字人一键生成能力",
+    "digital-human-oneclick-capability", "读取普通模式可用形象、音色、素材限制、价格与供应商状态。",
+    scope="digital-human-oneclick:read")
+CAPABILITIES["digital-human-oneclick-plan"] = _api(
+    "digital-human-oneclick-plan", "规划数字人一键生成", "digital-human-oneclick-plan",
+    "按文案或本人完整录音生成冻结时间轴、场景与素材需求，并返回 plan_digest。",
+    DH_PLAN_FIELDS, ["narration_mode"], "digital-human-oneclick:read")
+CAPABILITIES["digital-human-oneclick-plan"]["input_schema"]["oneOf"] = [
+    {"required": ["script"]}, {"required": ["audio_upload_id"]},
+]
+CAPABILITIES["digital-human-oneclick-consent"] = _api(
+    "digital-human-oneclick-consent", "确认数字人授权", "digital-human-oneclick-consent",
+    "保存与 plan_digest 绑定的本人照片、声音复刻和 AI 素材授权。",
+    {
+        "confirmed": {"type": "boolean", "const": True},
+        "consent_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 300},
+        "run_id": DH_RUN_ID, "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "script": DH_PLAN_FIELDS["script"], "photo_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "voice_mode": {"type": "string", "enum": ["existing", "audio"]},
+        "voice_ref": {"type": "string", "maxLength": 200},
+        "voice_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        **DH_PLAN_FIELDS,
+    }, ["confirmed", "consent_version", "purpose", "run_id", "plan_digest", "photo_sha256",
+        "voice_mode", "voice_ref", "narration_mode"],
+    "digital-human-oneclick:write", "write", True)
+CAPABILITIES["digital-human-oneclick-start"] = _api(
+    "digital-human-oneclick-start", "启动数字人一键生成", "digital-human-oneclick-start",
+    "先返回服务端报价；确认后以相同输入、quote_token 和 request_id 启动一次可恢复运行。",
+    {
+        "request_id": DH_REQUEST_ID, "consent_token": {"type": "string", "minLength": 16, "maxLength": 4096},
+        "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "portrait_upload_id": DH_UPLOAD_ID, "voice_key": {"type": "string", "maxLength": 200},
+        **DH_PLAN_FIELDS,
+    }, ["request_id", "consent_token", "plan_digest", "narration_mode", "allow_ai_materials",
+        "customer_upload_ids", "portrait_upload_id"],
+    "digital-human-oneclick:generate", "paid", True,
+    {"kind": "server_quote", "unit": "points", "confirmation": "same input + quote_token + --confirm"})
+CAPABILITIES["digital-human-oneclick-status"] = _api(
+    "digital-human-oneclick-status", "数字人运行状态", "digital-human-oneclick-status",
+    "查询原 run_id 的子任务、扣点、退款、失败原因和成片地址。",
+    {"run_id": DH_RUN_ID}, ["run_id"], "digital-human-oneclick:read")
+for _identifier, _name, _description in (
+    ("digital-human-oneclick-recover", "恢复数字人运行", "仅恢复原运行中可安全恢复的失败步骤。"),
+    ("digital-human-oneclick-abandon", "放弃数字人运行", "停止后续恢复并保留已有任务和账务审计。"),
+):
+    CAPABILITIES[_identifier] = _api(
+        _identifier, _name, _identifier, _description,
+        {"run_id": DH_RUN_ID, "request_id": DH_REQUEST_ID}, ["run_id", "request_id"],
+        "digital-human-oneclick:write", "write", True)
+CAPABILITIES["digital-human-oneclick-history"] = _api(
+    "digital-human-oneclick-history", "数字人成片历史", "digital-human-oneclick-history",
+    "读取当前账号的数字人成片历史。",
+    {"limit": {"type": "integer", "minimum": 1, "maximum": 100},
+     "offset": {"type": "integer", "minimum": 0, "maximum": 100000}},
+    scope="digital-human-oneclick:read")
 CAPABILITIES["digital-ip-projects"] = _api(
     "digital-ip-projects", "数字化 IP 项目列表", "digital-ip-projects", "读取当前账号的数字化 IP 项目。",
     scope="ip12:read")
@@ -416,6 +486,27 @@ CAPABILITIES["audio-upload"]["constraints"] = [
 ]
 CAPABILITIES["audio-upload"]["next_actions"] = [
     "把返回的 result.upload_id 作为 audio_upload_id 写入 voice-clone-create 或 digital-ip-audio-generate。",
+]
+CAPABILITIES["digital-human-oneclick-material-upload"] = _upload(
+    "digital-human-oneclick-material-upload", "上传数字人顾客素材",
+    "把本人明确指定的 PNG、JPG 或 WebP 私密上传到数字人一键生成素材区。",
+    "digital-human-oneclick:write",
+)
+CAPABILITIES["digital-human-oneclick-material-upload"]["next_actions"] = [
+    "把返回的 upload_id 加入 plan/start 的 customer_upload_ids；只能用于当前账号。",
+]
+CAPABILITIES["digital-human-oneclick-audio-upload"] = _upload(
+    "digital-human-oneclick-audio-upload", "上传数字人完整录音",
+    "把本人完整口播录音私密上传并安全切片；必须先生成一个稳定的 dh-run-* 标识。",
+    "digital-human-oneclick:write",
+)
+CAPABILITIES["digital-human-oneclick-audio-upload"]["file_input"] = {
+    "argument": "--file", "path": "absolute", "maxBytes": 30 * 1024 * 1024,
+    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg"],
+    "requiredMetadata": {"--run-id": "^dh-run-[A-Za-z0-9._:-]{8,128}$"},
+}
+CAPABILITIES["digital-human-oneclick-audio-upload"]["next_actions"] = [
+    "把返回的 audio_upload_id 与同一个 run_id 用于 plan、consent 和 start。",
 ]
 CAPABILITIES["director-breakdown-upload"] = _upload(
     "director-breakdown-upload", "编导本地素材反推",

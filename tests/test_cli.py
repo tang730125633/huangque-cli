@@ -66,6 +66,26 @@ class HqCliTests(unittest.TestCase):
         self.assertNotIn("director-scene-video-generate", cli.CAPABILITIES)
         self.assertNotIn("director-scene-talking-generate", cli.CAPABILITIES)
 
+    def test_digital_human_oneclick_actions_are_registered_as_real_capabilities(self):
+        for scope in (
+            "digital-human-oneclick:read", "digital-human-oneclick:write",
+            "digital-human-oneclick:generate",
+        ):
+            self.assertIn(scope, cli.LOGIN_SCOPES)
+        for identifier in (
+            "digital-human-oneclick-capability", "digital-human-oneclick-plan",
+            "digital-human-oneclick-consent", "digital-human-oneclick-start",
+            "digital-human-oneclick-status", "digital-human-oneclick-recover",
+            "digital-human-oneclick-abandon", "digital-human-oneclick-history",
+        ):
+            with self.subTest(identifier=identifier):
+                self.assertEqual("api", cli.CAPABILITIES[identifier]["kind"])
+        start = cli.CAPABILITIES["digital-human-oneclick-start"]
+        self.assertEqual("paid", start["side_effect"])
+        self.assertEqual("server_quote", start["cost"]["kind"])
+        self.assertTrue(start["confirmation_required"])
+        self.assertNotIn("digital-human-precision-start", cli.CAPABILITIES)
+
     def test_director_upload_describe_is_quote_first_without_changing_free_uploads(self):
         code, output, error = self.invoke(["describe", "director-breakdown-upload", "--json"])
         self.assertEqual(0, code, error)
@@ -1053,6 +1073,50 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(0, code, error)
         self.assertEqual("aud_" + "a" * 32, self.payload(output)["result"]["upload_id"])
         upload.assert_called_once_with(audio_path, "t" * 43)
+
+    def test_digital_human_material_upload_uses_dedicated_owner_scoped_transport(self):
+        self.authorize()
+        image_path = os.path.join(self.temp.name, "customer.png")
+        with patch.object(client, "upload_digital_human_material") as upload:
+            code, _, error = self.invoke([
+                "run", "digital-human-oneclick-material-upload", "--file", image_path,
+            ])
+            self.assertEqual(cli.EXIT_CONFIRMATION, code)
+            upload.assert_not_called()
+            upload.return_value = (200, {
+                "upload_id": "img_" + "c" * 32, "mime": "image/png", "bytes": 12,
+                "sha256": "d" * 64, "expires_in": 3600,
+            })
+            code, output, error = self.invoke([
+                "run", "digital-human-oneclick-material-upload", "--file", image_path,
+                "--confirm", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual("img_" + "c" * 32, self.payload(output)["result"]["upload_id"])
+        upload.assert_called_once_with(image_path, "t" * 43)
+
+    def test_digital_human_audio_upload_requires_stable_run_id(self):
+        self.authorize()
+        audio_path = os.path.join(self.temp.name, "complete.mp3")
+        run_id = "dh-run-audio-0001"
+        with patch.object(client, "upload_digital_human_audio") as upload:
+            code, _, error = self.invoke([
+                "run", "digital-human-oneclick-audio-upload", "--file", audio_path,
+                "--confirm",
+            ])
+            self.assertEqual(cli.EXIT_USAGE, code)
+            upload.assert_not_called()
+            upload.return_value = (200, {
+                "audio_upload_id": "dha_" + "a" * 32, "duration": 60.0,
+                "slice_count": 2, "source_sha256": "b" * 64,
+            })
+            code, output, error = self.invoke([
+                "run", "digital-human-oneclick-audio-upload", "--file", audio_path,
+                "--run-id", run_id, "--confirm", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual("dha_" + "a" * 32, self.payload(output)["result"]["audio_upload_id"])
+        upload.assert_called_once_with(audio_path, "t" * 43, run_id)
 
     def test_director_breakdown_upload_quotes_then_confirms_the_same_file_and_cost(self):
         self.authorize()

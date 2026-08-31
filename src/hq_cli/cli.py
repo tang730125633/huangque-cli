@@ -40,6 +40,7 @@ LOGIN_SCOPES = [
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
     "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read", "short-drama:write",
     "director:read", "director:generate",
+    "digital-human-oneclick:read", "digital-human-oneclick:write", "digital-human-oneclick:generate",
 ]
 
 
@@ -418,6 +419,7 @@ def build_parser():
     run.add_argument("--quote-token")
     run.add_argument("--expected-cost", type=int)
     run.add_argument("--file")
+    run.add_argument("--run-id")
     doctor = subcommands.add_parser("doctor", add_help=False, allow_abbrev=False)
     _add_common(doctor, "show_command_help")
     doctor.add_argument("--environment", choices=sorted(ENVIRONMENTS), default="main")
@@ -556,6 +558,8 @@ def main(argv=None):
                     raise CliError(EXIT_USAGE, "usage_error", "upload capabilities do not accept browser options")
                 if not args.file:
                     raise CliError(EXIT_USAGE, "usage_error", "%s requires --file /absolute/path" % args.id)
+                if args.run_id and args.id != "digital-human-oneclick-audio-upload":
+                    raise CliError(EXIT_USAGE, "usage_error", "--run-id is only valid for digital-human audio upload")
                 credentials = _credentials()
                 if args.id == "director-breakdown-upload":
                     if not args.confirm:
@@ -605,6 +609,13 @@ def main(argv=None):
                         upload_kind, uploader = "video", client.upload_video
                     elif args.id == "audio-upload":
                         upload_kind, uploader = "audio", client.upload_audio
+                    elif args.id == "digital-human-oneclick-material-upload":
+                        upload_kind, uploader = "digital-human material", client.upload_digital_human_material
+                    elif args.id == "digital-human-oneclick-audio-upload":
+                        if not args.run_id:
+                            raise CliError(EXIT_USAGE, "usage_error", "digital-human audio upload requires --run-id")
+                        upload_kind = "digital-human audio"
+                        uploader = lambda path, token: client.upload_digital_human_audio(path, token, args.run_id)
                     else:
                         upload_kind, uploader = "image", client.upload_image
                 if uploader is not None:
@@ -616,6 +627,8 @@ def main(argv=None):
                         raise CliError(EXIT_NETWORK, "upload_error", "%s upload failed: %s" % (upload_kind, exc))
                     result = _checked_response(status, upload)
             elif capability["kind"] == "navigation":
+                if args.run_id:
+                    raise CliError(EXIT_USAGE, "usage_error", "navigation does not accept --run-id")
                 if args.confirm or args.quote_token or args.expected_cost is not None:
                     raise CliError(EXIT_USAGE, "usage_error", "navigation does not accept confirmation or quote options")
                 url = resolve_url(capability, args.environment, payload)
@@ -627,6 +640,8 @@ def main(argv=None):
                         raise CliError(EXIT_BROWSER, "browser_error", "browser open failed: %s" % exc)
                 result = {"url": url, "opened_browser": opened_browser}
             else:
+                if args.run_id:
+                    raise CliError(EXIT_USAGE, "usage_error", "API capabilities do not accept --run-id")
                 if args.open_browser:
                     raise CliError(EXIT_USAGE, "usage_error", "API capabilities do not accept --open-browser")
                 if args.expected_cost is not None:
