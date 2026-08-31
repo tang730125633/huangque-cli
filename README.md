@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/readme/hero-zel-v1.webp" width="100%" alt="Zel and the orange cat guiding discovered capabilities through a quote, confirmation, task, and result gate">
+</p>
+
 # HQ CLI
 
 [![CI](https://github.com/tang730125633/huangque-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/tang730125633/huangque-cli/actions/workflows/ci.yml)
