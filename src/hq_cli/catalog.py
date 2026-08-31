@@ -707,10 +707,15 @@ AUDIO_FIELDS = {
     "pitch": {"type": "integer", "minimum": -12, "maximum": 12},
     "volume": {"type": "integer", "minimum": -50, "maximum": 100},
 }
-COLLECT_URL = {
+COLLECT_MEDIA_URL = {
     "type": "string", "minLength": 8, "maxLength": 2048,
-    "pattern": "^https?://(?:[^/?#@]+\\.)?(?:douyin\\.com|iesdouyin\\.com|xiaohongshu\\.com|xhslink\\.com|xhslink\\.cn)(?::(?:80|443))?(?:[/?#].*)?$",
-    "description": "抖音或小红书的公开内容链接；不接受口令、账号密码、本机路径或其他站点 URL",
+    "pattern": "^(?:https?://(?:[^/?#@]+\\.)?(?:douyin\\.com|iesdouyin\\.com|xiaohongshu\\.com|xhslink\\.com|xhslink\\.cn|bilibili\\.com|b23\\.tv)(?::(?:80|443))?(?:[/?#].*)?|https://weixin\\.qq\\.com(?::443)?/sph/[A-Za-z0-9]+(?:[?#].*)?)$",
+    "description": "抖音、小红书、视频号或 B 站的公开内容链接；视频号须使用 weixin.qq.com/sph/ 分享链接",
+}
+COLLECT_CONTENT_URL = {
+    "type": "string", "minLength": 8, "maxLength": 2048,
+    "pattern": "^(?:https?://(?:[^/?#@]+\\.)?(?:douyin\\.com|iesdouyin\\.com|xiaohongshu\\.com|xhslink\\.com|xhslink\\.cn|bilibili\\.com|b23\\.tv|x\\.com|twitter\\.com)(?::(?:80|443))?(?:[/?#].*)?|https://weixin\\.qq\\.com(?::443)?/sph/[A-Za-z0-9]+(?:[?#].*)?)$",
+    "description": "抖音、小红书、视频号、B 站或 X 单帖公开链接；视频号须使用 weixin.qq.com/sph/ 分享链接",
 }
 LEADS_FIELDS = {
     "keyword": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -937,9 +942,9 @@ for identifier, name, fields, required in (
     ("director-script-generate", "编导脚本生成", DIRECTOR_SCRIPT_FIELDS, ["prompt"]),
     ("director-breakdown", "编导链接拆解", DIRECTOR_BREAKDOWN_FIELDS, []),
     ("director-scene-image-generate", "编导分镜图片生成", DIRECTOR_SCENE_IMAGE_FIELDS, ["scenes"]),
-    ("collect-content", "采集内容与评论", {"url": COLLECT_URL}, ["url"]),
-    ("collect-video", "采集原视频", {"url": COLLECT_URL}, ["url"]),
-    ("collect-transcript", "提取口播文案", {"url": COLLECT_URL}, ["url"]),
+    ("collect-content", "采集内容与评论", {"url": COLLECT_CONTENT_URL}, ["url"]),
+    ("collect-video", "采集原视频", {"url": COLLECT_MEDIA_URL}, ["url"]),
+    ("collect-transcript", "提取口播文案", {"url": COLLECT_MEDIA_URL}, ["url"]),
     ("collect-search", "搜索平台内容", {
         "platform": {"type": "string", "enum": ["douyin", "xhs"]},
         "keyword": {"type": "string", "minLength": 1, "maxLength": 120},
