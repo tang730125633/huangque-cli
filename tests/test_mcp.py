@@ -20,6 +20,17 @@ class McpServerTests(unittest.TestCase):
         self.assertIn("quote_token", paid["properties"])
         upload = by_name["hq_image_upload"]["inputSchema"]
         self.assertEqual({"file", "confirm"}, set(upload["required"]))
+        digital_human_audio = by_name[
+            "hq_digital_human_oneclick_audio_upload"
+        ]["inputSchema"]
+        self.assertEqual(
+            {"file", "confirm", "run_id"},
+            set(digital_human_audio["required"]),
+        )
+        self.assertEqual(
+            "^dh-run-[A-Za-z0-9._:-]{8,128}$",
+            digital_human_audio["properties"]["run_id"]["pattern"],
+        )
         director_upload = by_name["hq_director_breakdown_upload"]["inputSchema"]
         self.assertEqual({"file"}, set(director_upload["required"]))
         self.assertEqual(
@@ -78,6 +89,44 @@ class McpServerTests(unittest.TestCase):
             "run", "director-breakdown-upload", "--file", "/tmp/director-reference.png",
             "--confirm", "--quote-token", "q.director.upload", "--expected-cost", "20",
         ], ""), calls[1])
+
+    def test_digital_human_audio_upload_maps_required_run_id(self):
+        calls = []
+
+        def runner(arguments, stdin_text):
+            calls.append((arguments, stdin_text))
+            return 0, {
+                "schema": "hq.run/v1",
+                "result": {"audio_upload_id": "dha_" + "a" * 32},
+            }
+
+        missing = mcp_server.call_tool(
+            "hq_digital_human_oneclick_audio_upload",
+            {"file": "/tmp/complete.mp3", "confirm": True},
+            runner=runner,
+        )
+        invalid = mcp_server.call_tool(
+            "hq_digital_human_oneclick_audio_upload",
+            {"file": "/tmp/complete.mp3", "run_id": "bad", "confirm": True},
+            runner=runner,
+        )
+        confirmed = mcp_server.call_tool(
+            "hq_digital_human_oneclick_audio_upload",
+            {
+                "file": "/tmp/complete.mp3",
+                "run_id": "dh-run-audio-0001",
+                "confirm": True,
+            },
+            runner=runner,
+        )
+        self.assertTrue(missing["isError"])
+        self.assertTrue(invalid["isError"])
+        self.assertNotIn("isError", confirmed)
+        self.assertEqual([([
+            "run", "digital-human-oneclick-audio-upload",
+            "--file", "/tmp/complete.mp3",
+            "--run-id", "dh-run-audio-0001", "--confirm",
+        ], "")], calls)
 
     def test_template_batch_passes_one_confirmation_to_the_fixed_cli_action(self):
         calls = []

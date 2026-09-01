@@ -221,8 +221,6 @@ def _validate(capability, payload):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s has too few items" % key)
             if len(value) > definition.get("maxItems", len(value)):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s has too many items" % key)
-            if definition.get("uniqueItems") and len(value) != len(set(value)):
-                raise CliError(EXIT_INPUT, "input_error", "input field %s contains duplicate items" % key)
             item = definition.get("items") or {}
             if item.get("type") == "string" and any(
                     not isinstance(entry, str) or len(entry) < item.get("minLength", 0)
@@ -239,6 +237,19 @@ def _validate(capability, payload):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
             if item.get("enum") and any(entry not in item["enum"] for entry in value):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
+            if definition.get("uniqueItems"):
+                try:
+                    has_duplicates = len(value) != len(set(value))
+                except TypeError:
+                    raise CliError(
+                        EXIT_INPUT, "input_error",
+                        "input field %s contains an invalid item" % key,
+                    )
+                if has_duplicates:
+                    raise CliError(
+                        EXIT_INPUT, "input_error",
+                        "input field %s contains duplicate items" % key,
+                    )
         if "enum" in definition and value not in definition["enum"]:
             raise CliError(EXIT_INPUT, "input_error", "input field %s must be one of: %s" % (key, ", ".join(map(str, definition["enum"]))))
         if "minLength" in definition and len(value) < definition["minLength"]:

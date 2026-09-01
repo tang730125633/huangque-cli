@@ -146,7 +146,16 @@ class HqCliTests(unittest.TestCase):
                 ["run", "digital-human-oneclick-consent", "--input", "@-", "--confirm"],
                 json.dumps({**consent, "confirmed": False}).encode(),
             )
+            malformed = json.dumps({
+                "narration_mode": "text", "customer_upload_ids": [{}],
+            }).encode()
+            item_code, _, item_error = self.invoke(
+                ["run", "digital-human-oneclick-plan", "--input", "@-"],
+                malformed,
+            )
         self.assertEqual(cli.EXIT_INPUT, code, error)
+        self.assertEqual(cli.EXIT_INPUT, item_code, item_error)
+        self.assertEqual("input_error", self.payload(item_error)["error"])
         request.assert_not_called()
 
         audio_types = cli.CAPABILITIES[
