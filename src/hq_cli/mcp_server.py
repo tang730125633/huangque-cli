@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import subprocess
 import sys
 
@@ -127,6 +128,14 @@ def _capability_schema(capability):
         else:
             properties["confirm"] = {"type": "boolean", "const": True}
             required.extend(["file", "confirm"])
+        for flag, definition in (
+                capability.get("file_input", {}).get("requiredMetadata") or {}).items():
+            name = flag.lstrip("-").replace("-", "_")
+            properties[name] = {
+                "type": "string", "pattern": definition,
+                "description": "Required upload metadata forwarded as %s." % flag,
+            }
+            required.append(name)
     elif capability["kind"] == "navigation":
         properties["open_browser"] = {
             "type": "boolean",
@@ -248,11 +257,20 @@ def _capability_command(capability, arguments):
     command = ["run", capability["id"]]
     stdin_text = ""
     if capability["kind"] == "upload":
+        metadata = []
+        for flag, pattern in (
+                capability.get("file_input", {}).get("requiredMetadata") or {}).items():
+            name = flag.lstrip("-").replace("-", "_")
+            value = values.pop(name, None)
+            if not isinstance(value, str) or not re.fullmatch(pattern, value):
+                raise ValueError("upload tool requires valid %s metadata" % name)
+            metadata.extend([flag, value])
         if values:
             raise ValueError("upload tool received unexpected capability input")
         if not isinstance(file_path, str) or not file_path:
             raise ValueError("upload tool requires one file path")
         command.extend(["--file", file_path])
+        command.extend(metadata)
     else:
         command.extend(["--input", "@-"])
         stdin_text = json.dumps(values, ensure_ascii=False, separators=(",", ":"))

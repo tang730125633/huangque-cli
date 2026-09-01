@@ -66,6 +66,103 @@ class HqCliTests(unittest.TestCase):
         self.assertNotIn("director-scene-video-generate", cli.CAPABILITIES)
         self.assertNotIn("director-scene-talking-generate", cli.CAPABILITIES)
 
+    def test_digital_human_oneclick_actions_are_registered_as_real_capabilities(self):
+        for scope in (
+            "digital-human-oneclick:read", "digital-human-oneclick:write",
+            "digital-human-oneclick:generate",
+        ):
+            self.assertIn(scope, cli.LOGIN_SCOPES)
+        for identifier in (
+            "digital-human-oneclick-capability", "digital-human-oneclick-plan",
+            "digital-human-oneclick-consent", "digital-human-oneclick-start",
+            "digital-human-oneclick-status", "digital-human-oneclick-recover",
+            "digital-human-oneclick-abandon", "digital-human-oneclick-history",
+        ):
+            with self.subTest(identifier=identifier):
+                self.assertEqual("api", cli.CAPABILITIES[identifier]["kind"])
+        start = cli.CAPABILITIES["digital-human-oneclick-start"]
+        self.assertEqual("paid", start["side_effect"])
+        self.assertEqual("server_quote", start["cost"]["kind"])
+        self.assertTrue(start["confirmation_required"])
+        self.assertNotIn("digital-human-precision-start", cli.CAPABILITIES)
+
+    def test_digital_human_contract_matches_merged_main_site(self):
+        consent_capability = cli.CAPABILITIES["digital-human-oneclick-consent"]
+        consent = {
+            "confirmed": True,
+            "consent_version": "digital-human-material-v3",
+            "purpose": "digital_human_material_v3",
+            "run_id": "dh-run-contract-0001",
+            "plan_digest": "a" * 64,
+            "photo_sha256": "b" * 64,
+            "voice_mode": "existing",
+            "voice_ref": "v" * 180,
+            "narration_mode": "text",
+            "customer_upload_ids": ["img_" + "c" * 32],
+        }
+        cli._validate(consent_capability, consent)
+        for field, invalid in (
+            ("confirmed", False),
+            ("consent_version", "digital-human-material-v2"),
+            ("purpose", "other-purpose"),
+            ("voice_ref", "v" * 181),
+            ("customer_upload_ids", ["not-an-upload-id"]),
+        ):
+            with self.subTest(consent_field=field):
+                with self.assertRaises(cli.CliError):
+                    cli._validate(consent_capability, {**consent, field: invalid})
+
+        start_capability = cli.CAPABILITIES["digital-human-oneclick-start"]
+        start = {
+            "request_id": "request-contract-0001",
+            "consent_token": "t" * 32,
+            "plan_digest": "a" * 64,
+            "narration_mode": "text",
+            "allow_ai_materials": False,
+            "customer_upload_ids": ["img_" + "d" * 32],
+            "portrait_upload_id": "img_" + "e" * 32,
+            "voice_key": "v" * 180,
+        }
+        cli._validate(start_capability, start)
+        cli._validate(start_capability, {**start, "consent_token": "t" * 512})
+        for field, invalid in (
+            ("consent_token", "t" * 31),
+            ("consent_token", "t" * 513),
+            ("voice_key", "v" * 181),
+            ("customer_upload_ids", ["img_bad"]),
+        ):
+            with self.subTest(start_field=field, size=len(invalid)):
+                with self.assertRaises(cli.CliError):
+                    cli._validate(start_capability, {**start, field: invalid})
+
+        history = cli.CAPABILITIES["digital-human-oneclick-history"]
+        cli._validate(history, {"limit": 50, "offset": 2000})
+        for invalid in ({"limit": 51}, {"offset": 2001}):
+            with self.assertRaises(cli.CliError):
+                cli._validate(history, invalid)
+
+        with patch("hq_cli.client.request_json") as request:
+            code, _, error = self.invoke(
+                ["run", "digital-human-oneclick-consent", "--input", "@-", "--confirm"],
+                json.dumps({**consent, "confirmed": False}).encode(),
+            )
+            malformed = json.dumps({
+                "narration_mode": "text", "customer_upload_ids": [{}],
+            }).encode()
+            item_code, _, item_error = self.invoke(
+                ["run", "digital-human-oneclick-plan", "--input", "@-"],
+                malformed,
+            )
+        self.assertEqual(cli.EXIT_INPUT, code, error)
+        self.assertEqual(cli.EXIT_INPUT, item_code, item_error)
+        self.assertEqual("input_error", self.payload(item_error)["error"])
+        request.assert_not_called()
+
+        audio_types = cli.CAPABILITIES[
+            "digital-human-oneclick-audio-upload"
+        ]["file_input"]["mimeTypes"]
+        self.assertNotIn("audio/ogg", audio_types)
+
     def test_director_upload_describe_is_quote_first_without_changing_free_uploads(self):
         code, output, error = self.invoke(["describe", "director-breakdown-upload", "--json"])
         self.assertEqual(0, code, error)
@@ -1054,6 +1151,50 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("aud_" + "a" * 32, self.payload(output)["result"]["upload_id"])
         upload.assert_called_once_with(audio_path, "t" * 43)
 
+    def test_digital_human_material_upload_uses_dedicated_owner_scoped_transport(self):
+        self.authorize()
+        image_path = os.path.join(self.temp.name, "customer.png")
+        with patch.object(client, "upload_digital_human_material") as upload:
+            code, _, error = self.invoke([
+                "run", "digital-human-oneclick-material-upload", "--file", image_path,
+            ])
+            self.assertEqual(cli.EXIT_CONFIRMATION, code)
+            upload.assert_not_called()
+            upload.return_value = (200, {
+                "upload_id": "img_" + "c" * 32, "mime": "image/png", "bytes": 12,
+                "sha256": "d" * 64, "expires_in": 3600,
+            })
+            code, output, error = self.invoke([
+                "run", "digital-human-oneclick-material-upload", "--file", image_path,
+                "--confirm", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual("img_" + "c" * 32, self.payload(output)["result"]["upload_id"])
+        upload.assert_called_once_with(image_path, "t" * 43)
+
+    def test_digital_human_audio_upload_requires_stable_run_id(self):
+        self.authorize()
+        audio_path = os.path.join(self.temp.name, "complete.mp3")
+        run_id = "dh-run-audio-0001"
+        with patch.object(client, "upload_digital_human_audio") as upload:
+            code, _, error = self.invoke([
+                "run", "digital-human-oneclick-audio-upload", "--file", audio_path,
+                "--confirm",
+            ])
+            self.assertEqual(cli.EXIT_USAGE, code)
+            upload.assert_not_called()
+            upload.return_value = (200, {
+                "audio_upload_id": "dha_" + "a" * 32, "duration": 60.0,
+                "slice_count": 2, "source_sha256": "b" * 64,
+            })
+            code, output, error = self.invoke([
+                "run", "digital-human-oneclick-audio-upload", "--file", audio_path,
+                "--run-id", run_id, "--confirm", "--json",
+            ])
+        self.assertEqual(0, code, error)
+        self.assertEqual("dha_" + "a" * 32, self.payload(output)["result"]["audio_upload_id"])
+        upload.assert_called_once_with(audio_path, "t" * 43, run_id)
+
     def test_director_breakdown_upload_quotes_then_confirms_the_same_file_and_cost(self):
         self.authorize()
         source_path = os.path.join(self.temp.name, "director-reference.png")
@@ -1382,6 +1523,82 @@ class HqCliTests(unittest.TestCase):
             handle.truncate(client.MAX_AUDIO_UPLOAD_BYTES + 1)
         with self.assertRaises(ValueError):
             client.upload_audio(str(oversized), "t" * 43)
+
+    def test_digital_human_audio_transport_is_fixed_bound_and_fail_closed(self):
+        raw = b"ID3" + b"digital-human-complete-audio"
+        audio_path = Path(self.temp.name) / "complete.mp3"
+        audio_path.write_bytes(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+        run_id = "dh-run-audio-0001"
+
+        class Response:
+            status = 200
+
+            def __init__(self, source_sha256):
+                self.source_sha256 = source_sha256
+
+            def read(self, _limit):
+                return json.dumps({
+                    "audio_upload_id": "dha_" + "a" * 32,
+                    "source_sha256": self.source_sha256,
+                }).encode()
+
+        class Connection:
+            def __init__(self, source_sha256=digest):
+                self.headers, self.sent = {}, bytearray()
+                self.source_sha256 = source_sha256
+
+            def putrequest(self, method, path, **_kwargs):
+                self.method, self.path = method, path
+
+            def putheader(self, key, value):
+                self.headers[key] = value
+
+            def endheaders(self):
+                pass
+
+            def send(self, chunk):
+                self.sent.extend(chunk)
+
+            def getresponse(self):
+                return Response(self.source_sha256)
+
+            def close(self):
+                pass
+
+        connection = Connection()
+        with patch.object(client.http.client, "HTTPSConnection", return_value=connection):
+            status, payload = client.upload_digital_human_audio(
+                str(audio_path), "t" * 43, run_id,
+            )
+        self.assertEqual((200, digest), (status, payload["source_sha256"]))
+        self.assertEqual(client.DIGITAL_HUMAN_AUDIO_UPLOAD_PATH, connection.path)
+        self.assertEqual("POST", connection.method)
+        self.assertEqual(run_id, connection.headers["X-HQ-Run-ID"])
+        self.assertEqual(digest, connection.headers["X-HQ-Audio-SHA256"])
+        self.assertEqual(raw, bytes(connection.sent))
+
+        with patch.object(
+                client.http.client, "HTTPSConnection",
+                return_value=Connection("f" * 64)):
+            with self.assertRaises(client.NetworkError):
+                client.upload_digital_human_audio(str(audio_path), "t" * 43, run_id)
+
+        with patch.object(client.http.client, "HTTPSConnection") as connect:
+            with self.assertRaises(ValueError):
+                client.upload_digital_human_audio(
+                    str(audio_path), "t" * 43, "invalid-run-id",
+                )
+            ogg_path = Path(self.temp.name) / "complete.ogg"
+            ogg_path.write_bytes(b"OggS" + b"unsupported")
+            with self.assertRaises(ValueError):
+                client.upload_digital_human_audio(str(ogg_path), "t" * 43, run_id)
+            with patch.object(client, "API_BASE", "https://evil.example"):
+                with self.assertRaises(ValueError):
+                    client.upload_digital_human_audio(
+                        str(audio_path), "t" * 43, run_id,
+                    )
+        connect.assert_not_called()
 
     def test_navigation_is_main_site_only_and_never_opens_by_default(self):
         with patch("hq_cli.cli.webbrowser.open") as opened:

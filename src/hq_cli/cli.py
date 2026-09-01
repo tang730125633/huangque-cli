@@ -40,6 +40,7 @@ LOGIN_SCOPES = [
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
     "inspiration:read", "inspiration:write", "leads:read", "leads:write", "short-drama:read", "short-drama:write",
     "director:read", "director:generate",
+    "digital-human-oneclick:read", "digital-human-oneclick:write", "digital-human-oneclick:generate",
 ]
 
 
@@ -192,6 +193,11 @@ def _validate(capability, payload):
         if key not in payload:
             continue
         value, value_type = payload[key], definition["type"]
+        if "const" in definition and value != definition["const"]:
+            raise CliError(
+                EXIT_INPUT, "input_error",
+                "input field %s must equal the documented constant" % key,
+            )
         if value_type == "string" and not isinstance(value, str):
             raise CliError(EXIT_INPUT, "input_error", "input field %s must be a string" % key)
         if value_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
@@ -215,12 +221,14 @@ def _validate(capability, payload):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s has too few items" % key)
             if len(value) > definition.get("maxItems", len(value)):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s has too many items" % key)
-            if definition.get("uniqueItems") and len(value) != len(set(value)):
-                raise CliError(EXIT_INPUT, "input_error", "input field %s contains duplicate items" % key)
             item = definition.get("items") or {}
             if item.get("type") == "string" and any(
                     not isinstance(entry, str) or len(entry) < item.get("minLength", 0)
                     or len(entry) > item.get("maxLength", len(entry)) for entry in value):
+                raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
+            if item.get("pattern") and any(
+                    not isinstance(entry, str)
+                    or not re.fullmatch(item["pattern"], entry) for entry in value):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
             if item.get("type") == "integer" and any(
                     isinstance(entry, bool) or not isinstance(entry, int)
@@ -229,6 +237,19 @@ def _validate(capability, payload):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
             if item.get("enum") and any(entry not in item["enum"] for entry in value):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
+            if definition.get("uniqueItems"):
+                try:
+                    has_duplicates = len(value) != len(set(value))
+                except TypeError:
+                    raise CliError(
+                        EXIT_INPUT, "input_error",
+                        "input field %s contains an invalid item" % key,
+                    )
+                if has_duplicates:
+                    raise CliError(
+                        EXIT_INPUT, "input_error",
+                        "input field %s contains duplicate items" % key,
+                    )
         if "enum" in definition and value not in definition["enum"]:
             raise CliError(EXIT_INPUT, "input_error", "input field %s must be one of: %s" % (key, ", ".join(map(str, definition["enum"]))))
         if "minLength" in definition and len(value) < definition["minLength"]:
@@ -418,6 +439,7 @@ def build_parser():
     run.add_argument("--quote-token")
     run.add_argument("--expected-cost", type=int)
     run.add_argument("--file")
+    run.add_argument("--run-id")
     doctor = subcommands.add_parser("doctor", add_help=False, allow_abbrev=False)
     _add_common(doctor, "show_command_help")
     doctor.add_argument("--environment", choices=sorted(ENVIRONMENTS), default="main")
@@ -556,6 +578,8 @@ def main(argv=None):
                     raise CliError(EXIT_USAGE, "usage_error", "upload capabilities do not accept browser options")
                 if not args.file:
                     raise CliError(EXIT_USAGE, "usage_error", "%s requires --file /absolute/path" % args.id)
+                if args.run_id and args.id != "digital-human-oneclick-audio-upload":
+                    raise CliError(EXIT_USAGE, "usage_error", "--run-id is only valid for digital-human audio upload")
                 credentials = _credentials()
                 if args.id == "director-breakdown-upload":
                     if not args.confirm:
@@ -605,6 +629,13 @@ def main(argv=None):
                         upload_kind, uploader = "video", client.upload_video
                     elif args.id == "audio-upload":
                         upload_kind, uploader = "audio", client.upload_audio
+                    elif args.id == "digital-human-oneclick-material-upload":
+                        upload_kind, uploader = "digital-human material", client.upload_digital_human_material
+                    elif args.id == "digital-human-oneclick-audio-upload":
+                        if not args.run_id:
+                            raise CliError(EXIT_USAGE, "usage_error", "digital-human audio upload requires --run-id")
+                        upload_kind = "digital-human audio"
+                        uploader = lambda path, token: client.upload_digital_human_audio(path, token, args.run_id)
                     else:
                         upload_kind, uploader = "image", client.upload_image
                 if uploader is not None:
@@ -616,6 +647,8 @@ def main(argv=None):
                         raise CliError(EXIT_NETWORK, "upload_error", "%s upload failed: %s" % (upload_kind, exc))
                     result = _checked_response(status, upload)
             elif capability["kind"] == "navigation":
+                if args.run_id:
+                    raise CliError(EXIT_USAGE, "usage_error", "navigation does not accept --run-id")
                 if args.confirm or args.quote_token or args.expected_cost is not None:
                     raise CliError(EXIT_USAGE, "usage_error", "navigation does not accept confirmation or quote options")
                 url = resolve_url(capability, args.environment, payload)
@@ -627,6 +660,8 @@ def main(argv=None):
                         raise CliError(EXIT_BROWSER, "browser_error", "browser open failed: %s" % exc)
                 result = {"url": url, "opened_browser": opened_browser}
             else:
+                if args.run_id:
+                    raise CliError(EXIT_USAGE, "usage_error", "API capabilities do not accept --run-id")
                 if args.open_browser:
                     raise CliError(EXIT_USAGE, "usage_error", "API capabilities do not accept --open-browser")
                 if args.expected_cost is not None:
