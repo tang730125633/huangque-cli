@@ -12,7 +12,8 @@ $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
 
 $Version = "0.13.5"
 $WheelName = "huangque_hq_cli-$Version-py3-none-any.whl"
-$WheelSha256 = "1ada6cf84a1e5d074b1a3ff79d347071da0bdef9c8b858b160ccba4702987332"
+$WheelSize = 55092
+$WheelSha256 = "387c686e83d2976ade3ec8ee29210c450792dd5e5c51369b8a6fcf07b2eb9fab"
 $WheelUrl = "https://github.com/tang730125633/huangque-cli/releases/download/v$Version/$WheelName"
 $MarkerText = "Huangque HQ CLI managed installation"
 
@@ -97,6 +98,10 @@ try {
         Invoke-WebRequest -UseBasicParsing -Uri $WheelUrl -OutFile $LocalWheel
     }
 
+    $ActualSize = (Get-Item -LiteralPath $LocalWheel).Length
+    if ($ActualSize -ne $WheelSize) {
+        Fail "wheel size verification failed"
+    }
     $ActualHash = (Get-FileHash -LiteralPath $LocalWheel -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($ActualHash -ne $WheelSha256) {
         Fail "wheel SHA-256 verification failed"
