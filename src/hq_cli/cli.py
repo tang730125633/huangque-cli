@@ -193,6 +193,11 @@ def _validate(capability, payload):
         if key not in payload:
             continue
         value, value_type = payload[key], definition["type"]
+        if "const" in definition and value != definition["const"]:
+            raise CliError(
+                EXIT_INPUT, "input_error",
+                "input field %s must equal the documented constant" % key,
+            )
         if value_type == "string" and not isinstance(value, str):
             raise CliError(EXIT_INPUT, "input_error", "input field %s must be a string" % key)
         if value_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
@@ -222,6 +227,10 @@ def _validate(capability, payload):
             if item.get("type") == "string" and any(
                     not isinstance(entry, str) or len(entry) < item.get("minLength", 0)
                     or len(entry) > item.get("maxLength", len(entry)) for entry in value):
+                raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
+            if item.get("pattern") and any(
+                    not isinstance(entry, str)
+                    or not re.fullmatch(item["pattern"], entry) for entry in value):
                 raise CliError(EXIT_INPUT, "input_error", "input field %s contains an invalid item" % key)
             if item.get("type") == "integer" and any(
                     isinstance(entry, bool) or not isinstance(entry, int)

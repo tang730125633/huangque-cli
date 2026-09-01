@@ -199,12 +199,12 @@ CAPABILITIES["digital-human-oneclick-consent"] = _api(
     "保存与 plan_digest 绑定的本人照片、声音复刻和 AI 素材授权。",
     {
         "confirmed": {"type": "boolean", "const": True},
-        "consent_version": {"type": "string", "minLength": 1, "maxLength": 80},
-        "purpose": {"type": "string", "minLength": 1, "maxLength": 300},
+        "consent_version": {"type": "string", "const": "digital-human-material-v3"},
+        "purpose": {"type": "string", "const": "digital_human_material_v3"},
         "run_id": DH_RUN_ID, "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "script": DH_PLAN_FIELDS["script"], "photo_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "voice_mode": {"type": "string", "enum": ["existing", "audio"]},
-        "voice_ref": {"type": "string", "maxLength": 200},
+        "voice_ref": {"type": "string", "maxLength": 180},
         "voice_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         **DH_PLAN_FIELDS,
     }, ["confirmed", "consent_version", "purpose", "run_id", "plan_digest", "photo_sha256",
@@ -214,9 +214,9 @@ CAPABILITIES["digital-human-oneclick-start"] = _api(
     "digital-human-oneclick-start", "启动数字人一键生成", "digital-human-oneclick-start",
     "先返回服务端报价；确认后以相同输入、quote_token 和 request_id 启动一次可恢复运行。",
     {
-        "request_id": DH_REQUEST_ID, "consent_token": {"type": "string", "minLength": 16, "maxLength": 4096},
+        "request_id": DH_REQUEST_ID, "consent_token": {"type": "string", "minLength": 32, "maxLength": 512},
         "plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-        "portrait_upload_id": DH_UPLOAD_ID, "voice_key": {"type": "string", "maxLength": 200},
+        "portrait_upload_id": DH_UPLOAD_ID, "voice_key": {"type": "string", "maxLength": 180},
         **DH_PLAN_FIELDS,
     }, ["request_id", "consent_token", "plan_digest", "narration_mode", "allow_ai_materials",
         "customer_upload_ids", "portrait_upload_id"],
@@ -237,8 +237,8 @@ for _identifier, _name, _description in (
 CAPABILITIES["digital-human-oneclick-history"] = _api(
     "digital-human-oneclick-history", "数字人成片历史", "digital-human-oneclick-history",
     "读取当前账号的数字人成片历史。",
-    {"limit": {"type": "integer", "minimum": 1, "maximum": 100},
-     "offset": {"type": "integer", "minimum": 0, "maximum": 100000}},
+    {"limit": {"type": "integer", "minimum": 1, "maximum": 50},
+     "offset": {"type": "integer", "minimum": 0, "maximum": 2000}},
     scope="digital-human-oneclick:read")
 CAPABILITIES["digital-ip-projects"] = _api(
     "digital-ip-projects", "数字化 IP 项目列表", "digital-ip-projects", "读取当前账号的数字化 IP 项目。",
@@ -502,7 +502,7 @@ CAPABILITIES["digital-human-oneclick-audio-upload"] = _upload(
 )
 CAPABILITIES["digital-human-oneclick-audio-upload"]["file_input"] = {
     "argument": "--file", "path": "absolute", "maxBytes": 30 * 1024 * 1024,
-    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/ogg"],
+    "mimeTypes": ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac"],
     "requiredMetadata": {"--run-id": "^dh-run-[A-Za-z0-9._:-]{8,128}$"},
 }
 CAPABILITIES["digital-human-oneclick-audio-upload"]["next_actions"] = [

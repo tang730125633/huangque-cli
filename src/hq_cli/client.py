@@ -109,6 +109,11 @@ def _audio_mime(header):
     return ""
 
 
+def _digital_human_audio_mime(header):
+    mime = _audio_mime(header)
+    return "" if mime == "audio/ogg" else mime
+
+
 def _open_media(path, max_bytes, mime_detector, size_error, type_error):
     if not isinstance(path, str) or not os.path.isabs(path):
         raise ValueError("--file must be an absolute path")
@@ -225,9 +230,9 @@ def _open_audio(path):
 
 def _open_digital_human_audio(path):
     return _open_media(
-        path, 30 * 1024 * 1024, _audio_mime,
+        path, 30 * 1024 * 1024, _digital_human_audio_mime,
         "digital-human audio must be between 1 byte and 30 MiB",
-        "digital-human audio must be MP3, WAV, M4A, AAC, or OGG",
+        "digital-human audio must be MP3, WAV, M4A, or AAC",
     )
 
 
