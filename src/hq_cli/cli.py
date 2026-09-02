@@ -266,6 +266,8 @@ def _validate(capability, payload):
         _validate_video_channel(payload)
     if capability.get("id") in {"text-video-generate", "director-scene-talking-generate"}:
         _validate_text_video_talking(payload)
+    if capability.get("id") in {"director-scene-image-generate", "director-scene-video-generate"}:
+        _validate_director_scenes(payload)
     if capability.get("id") == "leads-generate":
         platforms = payload.get("platforms") or []
         if any(platform in {"douyin", "xhs"} for platform in platforms) and not payload.get("keyword"):
@@ -313,6 +315,12 @@ def _validate_text_video_talking(payload):
             raise CliError(EXIT_INPUT, "input_error", "talking_material scene avatar is invalid")
     if not enabled:
         raise CliError(EXIT_INPUT, "input_error", "talking_material must enable at least one scene")
+
+
+def _validate_director_scenes(payload):
+    if not any(isinstance(item, dict) and isinstance(item.get("scene"), str)
+               and item["scene"].strip() for item in payload["scenes"]):
+        raise CliError(EXIT_INPUT, "input_error", "at least one director scene needs a description")
 
 
 def _doctor(environment):

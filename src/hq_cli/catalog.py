@@ -1300,10 +1300,11 @@ for identifier, name, fields, required in (
 CAPABILITIES["director-breakdown"]["input_schema"]["oneOf"] = [
     {"required": ["url"]}, {"required": ["urls"]},
 ]
-CAPABILITIES["director-scene-image-generate"]["constraints"] = [
-    "至少一个 scene 必须包含非空画面描述",
-    "先报价，再用完全相同的标准化输入确认一次",
-]
+for _identifier in ("director-scene-image-generate", "director-scene-video-generate"):
+    CAPABILITIES[_identifier]["constraints"] = [
+        "至少一个 scene 必须包含非空画面描述",
+        "先报价，再用完全相同的标准化输入确认一次",
+    ]
 
 CAPABILITIES["leads-generate"]["input_schema"]["anyOf"] = [
     {"required": ["keyword"]}, {"required": ["channels_targets"]},

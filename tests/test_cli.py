@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hq_cli import cli, client
+from hq_cli import cli, client, mcp_server
 
 
 class HqCliTests(unittest.TestCase):
@@ -275,6 +275,49 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual("execute", by_id[start]["agent"]["operation"])
             self.assertIn(quote, by_id[start]["agent"]["workflow"][0])
         self.assertTrue(by_id["short-drama-completion-confirm"]["confirmation_required"])
+
+    def test_pr22_b_class_contract_table(self):
+        tools = {item["name"]: item["inputSchema"] for item in mcp_server.list_tools()}
+        cases = (
+            ("director-workflow", "api", "read", False, {"workflow_id": "string"}),
+            ("director-storyboard-update", "api", "write", True, {"revision": "integer"}),
+            ("director-production-start", "api", "paid", True, {"request_id": "string"}),
+            ("director-production-recover", "api", "write", True, {"request_id": "string"}),
+            ("director-scene-video-generate", "api", "paid", True, {"scenes": "array"}),
+            ("short-drama-project", "api", "read", False, {"project_id": "string"}),
+            ("short-drama-create", "api", "write", True, {"request_id": "string"}),
+            ("short-drama-character-reference-generate", "api", "paid", True, {"revision": "integer"}),
+            ("short-drama-autodraft-start", "api", "write", True, {"quote_token": "string", "request_id": "string"}),
+            ("short-drama-autodraft-status", "api", "read", False, {"job_id": "string"}),
+            ("short-drama-completion-confirm", "api", "write", True, {"revision": "integer", "request_id": "string"}),
+            ("dl", "download", "download", False, {"url": "string"}),
+        )
+        self.assertEqual(156, len(cli.CAPABILITIES))
+        for identifier, kind, side_effect, confirmation, fields in cases:
+            with self.subTest(identifier=identifier):
+                capability = cli.CAPABILITIES[identifier]
+                schema = capability["input_schema"]
+                tool = tools[mcp_server.capability_tool_name(identifier)]
+                self.assertEqual((identifier, kind, side_effect, confirmation), (
+                    capability["id"], capability["kind"], capability["side_effect"],
+                    capability["confirmation_required"],
+                ))
+                self.assertTrue(set(fields) <= set(schema["required"]))
+                self.assertEqual(fields, {
+                    name: schema["properties"][name]["type"] for name in fields
+                })
+                if confirmation:
+                    self.assertIn("confirm", tool["properties"])
+                    if side_effect != "paid":
+                        self.assertIn("confirm", tool["required"])
+                if side_effect == "paid":
+                    self.assertIn("quote_token", tool["properties"])
+        self.assertEqual({"url", "output_file"}, set(tools["hq_dl"]["required"]))
+        scene_video = cli.CAPABILITIES["director-scene-video-generate"]
+        cli._validate(scene_video, {"scenes": [{"line": "旁白", "scene": "雨夜街头"}]})
+        for scenes in ([{}], [{"line": "旁白"}], [{"scene": "  "}]):
+            with self.subTest(scenes=scenes), self.assertRaises(cli.CliError):
+                cli._validate(scene_video, {"scenes": scenes})
 
     def test_every_capability_teaches_an_agent_how_to_use_and_recover_it(self):
         _, output, _ = self.invoke(["capabilities"])
