@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hq_cli import cli, client
+from hq_cli import cli, client, mcp_server
 
 
 class HqCliTests(unittest.TestCase):
@@ -188,7 +188,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.14.1", self.payload(output)["cli_version"])
+        self.assertEqual("0.15.0", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -264,7 +264,7 @@ class HqCliTests(unittest.TestCase):
             "short-drama-completion-readiness", "short-drama-completion",
             "short-drama-completion-confirm",
         }
-        self.assertEqual(156, len(by_id))
+        self.assertEqual(247, len(by_id))
         self.assertTrue(expected <= set(by_id))
         self.assertEqual("download", by_id["dl"]["kind"])
         self.assertEqual("paid", by_id["director-production-start"]["side_effect"])
@@ -275,6 +275,49 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual("execute", by_id[start]["agent"]["operation"])
             self.assertIn(quote, by_id[start]["agent"]["workflow"][0])
         self.assertTrue(by_id["short-drama-completion-confirm"]["confirmation_required"])
+
+    def test_pr22_b_class_contract_table(self):
+        tools = {item["name"]: item["inputSchema"] for item in mcp_server.list_tools()}
+        cases = (
+            ("director-workflow", "api", "read", False, {"workflow_id": "string"}),
+            ("director-storyboard-update", "api", "write", True, {"revision": "integer"}),
+            ("director-production-start", "api", "paid", True, {"request_id": "string"}),
+            ("director-production-recover", "api", "write", True, {"request_id": "string"}),
+            ("director-scene-video-generate", "api", "paid", True, {"scenes": "array"}),
+            ("short-drama-project", "api", "read", False, {"project_id": "string"}),
+            ("short-drama-create", "api", "write", True, {"request_id": "string"}),
+            ("short-drama-character-reference-generate", "api", "paid", True, {"revision": "integer"}),
+            ("short-drama-autodraft-start", "api", "write", True, {"quote_token": "string", "request_id": "string"}),
+            ("short-drama-autodraft-status", "api", "read", False, {"job_id": "string"}),
+            ("short-drama-completion-confirm", "api", "write", True, {"revision": "integer", "request_id": "string"}),
+            ("dl", "download", "download", False, {"url": "string"}),
+        )
+        self.assertEqual(247, len(cli.CAPABILITIES))
+        for identifier, kind, side_effect, confirmation, fields in cases:
+            with self.subTest(identifier=identifier):
+                capability = cli.CAPABILITIES[identifier]
+                schema = capability["input_schema"]
+                tool = tools[mcp_server.capability_tool_name(identifier)]
+                self.assertEqual((identifier, kind, side_effect, confirmation), (
+                    capability["id"], capability["kind"], capability["side_effect"],
+                    capability["confirmation_required"],
+                ))
+                self.assertTrue(set(fields) <= set(schema["required"]))
+                self.assertEqual(fields, {
+                    name: schema["properties"][name]["type"] for name in fields
+                })
+                if confirmation:
+                    self.assertIn("confirm", tool["properties"])
+                    if side_effect != "paid":
+                        self.assertIn("confirm", tool["required"])
+                if side_effect == "paid":
+                    self.assertIn("quote_token", tool["properties"])
+        self.assertEqual({"url", "output_file"}, set(tools["hq_dl"]["required"]))
+        scene_video = cli.CAPABILITIES["director-scene-video-generate"]
+        cli._validate(scene_video, {"scenes": [{"line": "旁白", "scene": "雨夜街头"}]})
+        for scenes in ([{}], [{"line": "旁白"}], [{"scene": "  "}]):
+            with self.subTest(scenes=scenes), self.assertRaises(cli.CliError):
+                cli._validate(scene_video, {"scenes": scenes})
 
     def test_every_capability_teaches_an_agent_how_to_use_and_recover_it(self):
         _, output, _ = self.invoke(["capabilities"])
@@ -1169,6 +1212,57 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(0, code, error)
         self.assertEqual("vid_" + "a" * 32, self.payload(output)["result"]["upload_id"])
         upload.assert_called_once_with(video_path, "t" * 43)
+
+    def test_web_parity_file_transports_are_fixed_and_confirmed(self):
+        self.authorize()
+        avatar_path = os.path.join(self.temp.name, "avatar.png")
+        video_path = os.path.join(self.temp.name, "h3.mp4")
+        for capability, path, target, result in (
+            ("profile-avatar-upload", avatar_path, "upload_profile_avatar", {"ok": True, "data": {"url": "/avatar.png"}}),
+            ("video-import", video_path, "upload_video_import", {"ok": True, "asset": {"id": 7}}),
+        ):
+            with self.subTest(capability=capability), patch.object(client, target) as upload:
+                code, _, _ = self.invoke(["run", capability, "--file", path])
+                self.assertEqual(cli.EXIT_CONFIRMATION, code)
+                upload.assert_not_called()
+                upload.return_value = (200, result)
+                code, output, error = self.invoke([
+                    "run", capability, "--file", path, "--confirm", "--json",
+                ])
+                self.assertEqual(0, code, error)
+                self.assertEqual(result, self.payload(output)["result"])
+                upload.assert_called_once_with(path, "t" * 43)
+
+        output_path = os.path.join(self.temp.name, "assets.zip")
+        payload = json.dumps({"assets": [{"kind": "video", "id": 7}]}).encode()
+        with patch.object(client, "download_file", return_value={
+            "path": output_path, "bytes": 12, "sha256": "a" * 64,
+            "content_type": "application/zip",
+        }) as download:
+            code, output, error = self.invoke([
+                "run", "asset-batch-download", "--input", "@-", "--output", output_path, "--json",
+            ], payload)
+        self.assertEqual(0, code, error)
+        self.assertEqual(output_path, self.payload(output)["result"]["path"])
+        download.assert_called_once_with(
+            "", output_path, "t" * 43, "assets",
+            post_payload={"assets": [{"kind": "video", "id": 7}]},
+        )
+
+        pdf_path = os.path.join(self.temp.name, "profile.pdf")
+        with patch.object(client, "download_file", return_value={
+            "path": pdf_path, "bytes": 12, "sha256": "b" * 64,
+            "content_type": "application/pdf",
+        }) as download:
+            code, _, error = self.invoke([
+                "run", "creator-agent-background-pdf", "--input", "@-",
+                "--output", pdf_path, "--json",
+            ], b'{"project_id":"abc123def456"}')
+        self.assertEqual(0, code, error)
+        download.assert_called_once_with(
+            "", pdf_path, "t" * 43, "creator-profile",
+            direct_path="/api/creator-agent/projects/abc123def456/background.pdf",
+        )
 
     def test_audio_upload_requires_confirmation_and_uses_file_transport(self):
         self.authorize()
