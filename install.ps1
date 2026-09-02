@@ -10,10 +10,10 @@ $ErrorActionPreference = "Stop"
 $env:PYTHONUTF8 = "1"
 $env:PIP_DISABLE_PIP_VERSION_CHECK = "1"
 
-$Version = "0.15.1"
+$Version = "0.15.2"
 $WheelName = "huangque_hq_cli-$Version-py3-none-any.whl"
-$WheelSize = 64485
-$WheelSha256 = "885563cb428b45089b681d3701dfcda161c9aa5cbf08c3c07a2e0c5737542053"
+$WheelSize = 64405
+$WheelSha256 = "5b46bddc58219f09c873aa36fc5eec8f1599fac7699a47679d7ff5cf0021e7f0"
 $WheelUrl = "https://github.com/tang730125633/huangque-cli/releases/download/v$Version/$WheelName"
 $MarkerText = "Huangque HQ CLI managed installation"
 
