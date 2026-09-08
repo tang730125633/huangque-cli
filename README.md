@@ -194,6 +194,26 @@ JSON
 
 时长由文案自动计算，背景音乐默认开启，素材固定来自平台已审核素材库。拿到 `job_id` 后只轮询 `task`，不要再次提交生成命令。
 
+需要配音时，先运行 `hq run voices --json`，从 `ready=true` 的项目复制 `voice_key` 和 `scope`，再添加可选 `voiceover`。文案最多 120 字，语速范围 0.5–2.0。口播 BGM 默认关闭；设置 `bgm: true` 后可用 `bgm_volume` 调整 0–100% 音量，接口值使用 0–1。无论是否启用 BGM，成片时长都跟随配音：
+
+```json
+{
+  "top_text": "真正拉开差距的，不是工具",
+  "bottom_text": "评论区留下关键词，领取完整方案",
+  "template_id": "full-overlay-bold",
+  "voiceover": {
+    "text": "真正拉开差距的，不是你用了多少工具，而是能不能把工具变成稳定产出的流程。",
+    "voice": "vip_slot_12345678",
+    "voice_scope": "personal",
+    "speed": 1.2,
+    "bgm": true,
+    "bgm_volume": 0.35
+  }
+}
+```
+
+不传 `voiceover` 即关闭配音并继续使用背景音乐。传入 `voiceover` 但省略 `bgm` 时只保留口播；`bgm_volume` 仅在 `bgm=true` 时有效，省略后默认 `0.2`。批量命令同样支持这组配音参数并继续共享同一段口播缓存。
+
 同一文案与模板需要一次生成 2–5 条时，增加 `count` 并使用批量能力：
 
 ```json
@@ -213,6 +233,23 @@ hq run matrix-template-batch-generate --input @matrix-template-batch.json --conf
 ```
 
 批量确认返回 `job_ids`；每个子任务仍沿用单条模板成片的幂等、失败退款和资产合同，只轮询这些原始 Job，不重新提交整批。
+
+把本人已经完成的图片、视频与文字卡按顺序拼成一条成片时，使用 `video-timeline-compose`。每段的 `transition` 表示它进入下一段的方式，最后一段必须为 `none`：
+
+```json
+{
+  "segments": [
+    {"type":"image","asset_id":101,"duration":3,"transition":"fade"},
+    {"type":"video","asset_id":202,"trim_start":0,"trim_end":5,"transition":"fade"},
+    {"type":"text_card","text":"把 AI 变成真正能交付结果的人","duration":3,"transition":"none"}
+  ],
+  "ratio":"9:16",
+  "preserve_source_audio":true,
+  "bgm":false
+}
+```
+
+首轮只返回按“基础费 + 素材段 + 每 30 秒”计算的 `cost_breakdown`，不会创建任务或扣点。核对素材顺序、裁剪和报价后，用完全相同的 JSON、`quote_token` 与 `--confirm` 提交。需要背景音乐时必须同时提供当前账号自己的 `bgm_asset_id`，系统不会自动挑选版权不明的音乐。
 
 需要混入口播视频素材时，先上传并导入一个或多个人物，再生成分镜方案：
 

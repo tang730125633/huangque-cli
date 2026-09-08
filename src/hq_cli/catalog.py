@@ -1209,16 +1209,62 @@ TEXT_VIDEO_PLAN_FIELDS = {
 }
 TEXT_VIDEO_PLAN_FIELDS["ratio"] = {"type": "number", "minimum": 0.1, "maximum": 0.5}
 
+MATRIX_TEMPLATE_VOICEOVER = _schema({
+    "text": {
+        "type": "string", "minLength": 1, "maxLength": 120,
+        "description": "模板成片配音文案；传入 voiceover 即开启配音",
+    },
+    "voice": {
+        "type": "string", "minLength": 1, "maxLength": 128,
+        "description": "从 voices 返回的 ready=true 项复制 voice_key",
+    },
+    "voice_scope": {
+        "type": "string", "enum": ["public", "personal"],
+        "description": "可选；应与 voices 返回的 scope 一致",
+    },
+    "speed": {
+        "type": "number", "minimum": 0.5, "maximum": 2.0,
+        "default": 1.0,
+    },
+    "bgm": {
+        "type": "boolean", "default": False,
+        "description": "可选；口播时是否同时加入背景音乐，默认关闭",
+    },
+    "bgm_volume": {
+        "type": "number", "minimum": 0, "maximum": 1, "default": 0.2,
+        "description": "仅在 bgm=true 时可用；0.2 表示 20%",
+    },
+}, ["text", "voice"])
+
 MATRIX_TEMPLATE_FIELDS = {
     "top_text": {"type": "string", "minLength": 2, "maxLength": 60},
     "bottom_text": {"type": "string", "minLength": 2, "maxLength": 80},
     "template_id": {"type": "string", "minLength": 1, "maxLength": 64,
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},
     "font_family": {"type": "string", "maxLength": 80},
+    "voiceover": MATRIX_TEMPLATE_VOICEOVER,
 }
 MATRIX_TEMPLATE_BATCH_FIELDS = {
     **MATRIX_TEMPLATE_FIELDS,
     "count": {"type": "integer", "minimum": 2, "maximum": 5},
+}
+TIMELINE_VOICEOVER = _schema({
+    "text": {"type": "string", "minLength": 1, "maxLength": 120},
+    "voice": {"type": "string", "minLength": 1, "maxLength": 128},
+    "voice_scope": {"type": "string", "enum": ["public", "personal"]},
+    "speed": {"type": "number", "minimum": 0.5, "maximum": 2.0},
+}, ["text", "voice"])
+TIMELINE_FIELDS = {
+    "segments": {
+        "type": "array", "minItems": 2, "maxItems": 20,
+        "items": {"type": "object"},
+    },
+    "ratio": {"type": "string", "enum": ["9:16", "16:9", "1:1"]},
+    "preserve_source_audio": {"type": "boolean", "default": True},
+    "bgm": {"type": "boolean", "default": False},
+    "bgm_asset_id": {"type": "integer", "minimum": 1, "maximum": 2**63 - 1},
+    "bgm_volume": {"type": "number", "minimum": 0.05, "maximum": 0.8},
+    "voiceover": TIMELINE_VOICEOVER,
 }
 
 for identifier, name, fields, required in (
@@ -1233,6 +1279,8 @@ for identifier, name, fields, required in (
      ["top_text", "bottom_text", "template_id"]),
     ("matrix-template-batch-generate", "模板成片批量生成", MATRIX_TEMPLATE_BATCH_FIELDS,
      ["top_text", "bottom_text", "template_id", "count"]),
+    ("video-timeline-compose", "多素材时间轴拼接成片", TIMELINE_FIELDS,
+     ["segments"]),
     ("digital-ip-text-generate", "数字IP单条文案生成", DIGITAL_IP_TEXT_FIELDS,
      ["text", "voice"]),
     ("digital-ip-audio-generate", "数字IP本人资产音频生成", DIGITAL_IP_AUDIO_FIELDS,
@@ -1366,7 +1414,11 @@ CAPABILITIES["text-video-generate"]["next_actions"] = [
 CAPABILITIES["matrix-template-generate"]["constraints"] = [
     "template_id must be selected from matrix-template-templates",
     "font_family is optional and must be selected from matrix-template-templates fonts",
-    "duration is calculated automatically and BGM is enabled by default",
+    "voiceover is optional; copy voice and optional voice_scope from a ready item returned by voices",
+    "voiceover text is limited to 120 characters and speed is 0.5-2.0 in 0.1 steps",
+    "voiceover.bgm defaults to false; when true, bgm_volume defaults to 0.2 and accepts 0-1",
+    "with voiceover, final duration always follows narration; without voiceover BGM remains enabled",
+    "duration is calculated automatically",
     "the first call only quotes the fixed template-video cost",
 ]
 CAPABILITIES["matrix-template-generate"]["next_actions"] = [
@@ -1375,10 +1427,25 @@ CAPABILITIES["matrix-template-generate"]["next_actions"] = [
 CAPABILITIES["matrix-template-batch-generate"]["constraints"] = [
     "template_id and optional font_family must be selected from matrix-template-templates",
     "count creates 2-5 independent jobs under one total quote and one confirmation",
-    "duration is calculated automatically and BGM is enabled by default",
+    "voiceover is optional; copy voice and optional voice_scope from a ready item returned by voices",
+    "voiceover text is limited to 120 characters and speed is 0.5-2.0 in 0.1 steps",
+    "voiceover.bgm defaults to false; when true, bgm_volume defaults to 0.2 and accepts 0-1",
+    "with voiceover, final duration always follows narration; without voiceover BGM remains enabled",
+    "duration is calculated automatically",
 ]
 CAPABILITIES["matrix-template-batch-generate"]["next_actions"] = [
     "核对总价与 count 后，用完全相同的输入、quote_token 与 --confirm 提交；只轮询返回的 job_ids。",
+]
+CAPABILITIES["video-timeline-compose"]["constraints"] = [
+    "segments must contain 2-20 owner-scoped image, video, or text_card items",
+    "image duration is 1-10s; text card duration is 1-8s; each trimmed video is at most 60s",
+    "transition applies from the current segment to the next and supports none or fade; the final segment must use none",
+    "the final timeline is at most 180s and renders at 1080p in 9:16, 16:9, or 1:1",
+    "bgm=true requires bgm_asset_id from the current account; no platform music is selected automatically",
+    "the first call only quotes and returns cost_breakdown; confirmation must reuse identical input and quote_token",
+]
+CAPABILITIES["video-timeline-compose"]["next_actions"] = [
+    "核对每段素材、裁剪、转场和 cost_breakdown，再用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后只调用 task 轮询。",
 ]
 CAPABILITIES["text-video-avatar-import"] = _api(
     "text-video-avatar-import", "导入口播人物", "text-video-avatar-import",
@@ -1504,6 +1571,7 @@ for identifier, website_modes in {
     "matrix-template-templates": ["matrix_template.single"],
     "matrix-template-generate": ["matrix_template.single"],
     "matrix-template-batch-generate": ["matrix_template.batch"],
+    "video-timeline-compose": ["matrix_template.single"],
     "short-drama": ["live_action"],
     "short-drama-create": ["live_action"], "short-drama-delete": ["live_action"],
     "short-drama-projects": ["live_action"], "short-drama-project": ["live_action"],
