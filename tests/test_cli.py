@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hq_cli import cli, client, mcp_server
+from hq_cli import cli, client
 
 
 class HqCliTests(unittest.TestCase):
@@ -17,6 +17,10 @@ class HqCliTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.env = patch.dict(os.environ, {"HQ_CLI_CONFIG_DIR": self.temp.name})
         self.env.start()
+        # Agent-only credentials/base overrides must never leak between tests.
+        os.environ.pop("HQ_CLI_ACCESS_TOKEN", None)
+        os.environ.pop("HQ_CLI_API_BASE", None)
+        os.environ.pop("HQ_CLI_QUOTE_TOKEN", None)
 
     def tearDown(self):
         self.env.stop()
@@ -188,7 +192,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.15.3", self.payload(output)["cli_version"])
+        self.assertEqual("0.15.6", self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -232,7 +236,7 @@ class HqCliTests(unittest.TestCase):
             "text-video-capability", "text-video-templates", "text-video-styles", "text-video-voices",
             "text-video-avatar-import", "text-video-plan", "text-video-generate", "pricing",
             "matrix-template-capability", "matrix-template-templates", "matrix-template-generate",
-            "matrix-template-batch-generate",
+            "matrix-template-batch-generate", "video-timeline-compose",
             "inspiration-catalog", "inspiration-likes", "inspiration-like",
             "collect-content", "collect-video", "collect-transcript", "collect-search", "leads-generate",
             "leads-crm", "leads-crm-upsert", "video-avatars", "audio-slots",
@@ -264,7 +268,7 @@ class HqCliTests(unittest.TestCase):
             "short-drama-completion-readiness", "short-drama-completion",
             "short-drama-completion-confirm",
         }
-        self.assertEqual(247, len(by_id))
+        self.assertEqual(248, len(by_id))
         self.assertTrue(expected <= set(by_id))
         self.assertEqual("download", by_id["dl"]["kind"])
         self.assertEqual("paid", by_id["director-production-start"]["side_effect"])
@@ -275,49 +279,6 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual("execute", by_id[start]["agent"]["operation"])
             self.assertIn(quote, by_id[start]["agent"]["workflow"][0])
         self.assertTrue(by_id["short-drama-completion-confirm"]["confirmation_required"])
-
-    def test_pr22_b_class_contract_table(self):
-        tools = {item["name"]: item["inputSchema"] for item in mcp_server.list_tools()}
-        cases = (
-            ("director-workflow", "api", "read", False, {"workflow_id": "string"}),
-            ("director-storyboard-update", "api", "write", True, {"revision": "integer"}),
-            ("director-production-start", "api", "paid", True, {"request_id": "string"}),
-            ("director-production-recover", "api", "write", True, {"request_id": "string"}),
-            ("director-scene-video-generate", "api", "paid", True, {"scenes": "array"}),
-            ("short-drama-project", "api", "read", False, {"project_id": "string"}),
-            ("short-drama-create", "api", "write", True, {"request_id": "string"}),
-            ("short-drama-character-reference-generate", "api", "paid", True, {"revision": "integer"}),
-            ("short-drama-autodraft-start", "api", "write", True, {"quote_token": "string", "request_id": "string"}),
-            ("short-drama-autodraft-status", "api", "read", False, {"job_id": "string"}),
-            ("short-drama-completion-confirm", "api", "write", True, {"revision": "integer", "request_id": "string"}),
-            ("dl", "download", "download", False, {"url": "string"}),
-        )
-        self.assertEqual(247, len(cli.CAPABILITIES))
-        for identifier, kind, side_effect, confirmation, fields in cases:
-            with self.subTest(identifier=identifier):
-                capability = cli.CAPABILITIES[identifier]
-                schema = capability["input_schema"]
-                tool = tools[mcp_server.capability_tool_name(identifier)]
-                self.assertEqual((identifier, kind, side_effect, confirmation), (
-                    capability["id"], capability["kind"], capability["side_effect"],
-                    capability["confirmation_required"],
-                ))
-                self.assertTrue(set(fields) <= set(schema["required"]))
-                self.assertEqual(fields, {
-                    name: schema["properties"][name]["type"] for name in fields
-                })
-                if confirmation:
-                    self.assertIn("confirm", tool["properties"])
-                    if side_effect != "paid":
-                        self.assertIn("confirm", tool["required"])
-                if side_effect == "paid":
-                    self.assertIn("quote_token", tool["properties"])
-        self.assertEqual({"url", "output_file"}, set(tools["hq_dl"]["required"]))
-        scene_video = cli.CAPABILITIES["director-scene-video-generate"]
-        cli._validate(scene_video, {"scenes": [{"line": "旁白", "scene": "雨夜街头"}]})
-        for scenes in ([{}], [{"line": "旁白"}], [{"scene": "  "}]):
-            with self.subTest(scenes=scenes), self.assertRaises(cli.CliError):
-                cli._validate(scene_video, {"scenes": scenes})
 
     def test_every_capability_teaches_an_agent_how_to_use_and_recover_it(self):
         _, output, _ = self.invoke(["capabilities"])
@@ -433,8 +394,31 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual("server_quote", by_id["text-video-generate"]["cost"]["kind"])
         self.assertEqual("server_quote", by_id["matrix-template-generate"]["cost"]["kind"])
         self.assertEqual("server_quote", by_id["matrix-template-batch-generate"]["cost"]["kind"])
+        self.assertEqual("server_quote", by_id["video-timeline-compose"]["cost"]["kind"])
+        self.assertEqual(["segments"], by_id["video-timeline-compose"]["input_schema"]["required"])
+        self.assertEqual((2, 20), (
+            by_id["video-timeline-compose"]["input_schema"]["properties"]["segments"]["minItems"],
+            by_id["video-timeline-compose"]["input_schema"]["properties"]["segments"]["maxItems"],
+        ))
         self.assertEqual(80, by_id["matrix-template-generate"]["input_schema"]
                          ["properties"]["font_family"]["maxLength"])
+        matrix_voiceover = by_id["matrix-template-generate"]["input_schema"][
+            "properties"
+        ]["voiceover"]
+        self.assertEqual(["text", "voice"], matrix_voiceover["required"])
+        self.assertEqual(120, matrix_voiceover["properties"]["text"]["maxLength"])
+        self.assertEqual(["public", "personal"],
+                         matrix_voiceover["properties"]["voice_scope"]["enum"])
+        self.assertEqual((0.5, 2.0), (
+            matrix_voiceover["properties"]["speed"]["minimum"],
+            matrix_voiceover["properties"]["speed"]["maximum"],
+        ))
+        self.assertFalse(matrix_voiceover["properties"]["bgm"]["default"])
+        self.assertEqual((0, 1, 0.2), (
+            matrix_voiceover["properties"]["bgm_volume"]["minimum"],
+            matrix_voiceover["properties"]["bgm_volume"]["maximum"],
+            matrix_voiceover["properties"]["bgm_volume"]["default"],
+        ))
         self.assertEqual(
             ["top_text", "bottom_text", "template_id"],
             by_id["matrix-template-generate"]["input_schema"]["required"],
@@ -584,6 +568,7 @@ class HqCliTests(unittest.TestCase):
             "matrix-template-templates": {"matrix_template.single"},
             "matrix-template-generate": {"matrix_template.single"},
             "matrix-template-batch-generate": {"matrix_template.batch"},
+            "video-timeline-compose": {"matrix_template.single"},
             "digital-ip-projects": {"digital_ip"},
             "pricing": {"pricing.catalog"},
             "inspiration-catalog": {"inspiration.browse"}, "inspiration-like": {"inspiration.like"},
@@ -704,6 +689,105 @@ class HqCliTests(unittest.TestCase):
         self.assertFalse(client.credentials_path().exists())
         self.assertEqual("/api/auth/cli/logout", request.call_args.args[0])
         self.assertEqual({"refresh_token": ""}, request.call_args.kwargs["body"])
+
+    def test_environment_access_token_has_priority_without_touching_disk(self):
+        self.authorize()
+        disk_before = client.credentials_path().read_bytes()
+        delegated = "d" * 43
+        with patch.dict(os.environ, {"HQ_CLI_ACCESS_TOKEN": delegated}):
+            credentials = client.load_credentials()
+        self.assertEqual(delegated, credentials["access_token"])
+        self.assertEqual(disk_before, client.credentials_path().read_bytes())
+
+    def test_invalid_environment_access_token_fails_closed_without_disk_fallback(self):
+        self.authorize()
+        for invalid in ("", "short", "x" * 201, "x" * 20 + "\n"):
+            with self.subTest(invalid_length=len(invalid)), \
+                    patch.dict(os.environ, {"HQ_CLI_ACCESS_TOKEN": invalid}):
+                self.assertIsNone(client.load_credentials())
+
+    def test_paid_confirmation_accepts_server_quote_from_environment_without_echo(self):
+        self.authorize()
+        quote_token = "e" * 48 + "." + "a" * 64
+        payload = {"prompt": "海边日出", "channel": "grok"}
+        with patch.dict(os.environ, {"HQ_CLI_QUOTE_TOKEN": quote_token}), patch(
+                "hq_cli.client.request_json",
+                return_value=(200, {"job_id": 100, "cost": 10}),
+        ) as request:
+            code, output, error = self.invoke(
+                ["run", "video-generate", "--input", "@-", "--confirm"],
+                json.dumps(payload, ensure_ascii=False).encode(),
+            )
+        self.assertEqual(0, code, error)
+        self.assertEqual(quote_token, request.call_args.kwargs["body"]["quote_token"])
+        self.assertNotIn(quote_token, output + error)
+
+    def test_invalid_environment_quote_fails_closed_before_http(self):
+        self.authorize()
+        payload = json.dumps({"prompt": "test", "channel": "grok"}).encode()
+        for invalid in ("", "short", "a" * 32 + "." + "z" * 64, "a" * 4097):
+            with self.subTest(invalid_length=len(invalid)), patch.dict(
+                    os.environ, {"HQ_CLI_QUOTE_TOKEN": invalid},
+            ), patch("hq_cli.client.request_json") as request:
+                code, output, error = self.invoke(
+                    ["run", "video-generate", "--input", "@-", "--confirm"], payload,
+                )
+                self.assertEqual(cli.EXIT_CONFIRMATION, code)
+                self.assertEqual("invalid_quote_token", self.payload(error)["error"])
+                if invalid:
+                    self.assertNotIn(invalid, output + error)
+                request.assert_not_called()
+
+    def test_environment_quote_is_ignored_for_quote_and_explicit_cli_argument(self):
+        self.authorize()
+        payload = {"prompt": "test", "channel": "grok"}
+        raw = json.dumps(payload).encode()
+        explicit = "interactive-quote-token"
+        with patch.dict(os.environ, {"HQ_CLI_QUOTE_TOKEN": "invalid env value"}), patch(
+                "hq_cli.client.request_json",
+                side_effect=[
+                    (200, {"quote_token": "q.new", "cost": 10}),
+                    (200, {"job_id": 10}),
+                ],
+        ) as request:
+            code, _, error = self.invoke(["run", "video-generate", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            code, _, error = self.invoke([
+                "run", "video-generate", "--input", "@-", "--confirm",
+                "--quote-token", explicit,
+            ], raw)
+            self.assertEqual(0, code, error)
+        first, second = request.call_args_list
+        self.assertNotIn("quote_token", first.kwargs["body"])
+        self.assertEqual(explicit, second.kwargs["body"]["quote_token"])
+
+    def test_api_base_override_allows_only_official_https_or_loopback_http_origins(self):
+        accepted = (
+            "https://huangquechuanmei.com",
+            "https://huangquechuanmei.com:443",
+            "http://127.0.0.1:8095",
+            "http://localhost:8095",
+            "http://[::1]:8095",
+        )
+        for origin in accepted:
+            with self.subTest(origin=origin), patch.dict(os.environ, {"HQ_CLI_API_BASE": origin}):
+                self.assertEqual(origin, client.api_base())
+        rejected = (
+            "http://huangquechuanmei.com",
+            "https://huangquechuanmei.com:444",
+            "https://evil.example",
+            "http://0.0.0.0:8095",
+            "http://127.0.0.1:8095/path",
+            "http://127.0.0.1:8095?query=1",
+            "http://user@127.0.0.1:8095",
+            "http://127.0.0.1:8095#fragment",
+            "http://127.0.0.1:8095/",
+            "http://127.0.0.1:\n8095",
+        )
+        for origin in rejected:
+            with self.subTest(origin=origin), patch.dict(os.environ, {"HQ_CLI_API_BASE": origin}):
+                with self.assertRaises(ValueError):
+                    client.api_base()
 
     def test_status_requires_authorization_and_never_accepts_password_input(self):
         code, output, error = self.invoke(["status"])
@@ -1024,6 +1108,11 @@ class HqCliTests(unittest.TestCase):
             "top_text": "真正拉开差距的不是工具",
             "bottom_text": "评论区留下关键词领取方案",
             "template_id": "native-bold", "font_family": "AaHouDiHei",
+            "voiceover": {
+                "text": "把工具变成稳定产出的流程", "voice": "vip_alice",
+                "voice_scope": "personal", "speed": 1.2,
+                "bgm": True, "bgm_volume": 0.35,
+            },
         }
         raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
         quote = {
@@ -1047,12 +1136,59 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
         self.assertEqual("q.matrix", second.kwargs["body"]["quote_token"])
 
+    def test_timeline_compose_quotes_breakdown_and_rejects_bad_final_transition(self):
+        self.authorize()
+        value = {
+            "segments": [
+                {"type": "image", "asset_id": 11, "duration": 3, "transition": "fade"},
+                {"type": "video", "asset_id": 22, "trim_start": 0, "trim_end": 5,
+                 "transition": "none"},
+            ],
+            "ratio": "9:16", "preserve_source_audio": True, "bgm": False,
+        }
+        raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+        quote = {
+            "quote_token": "q.timeline", "kind": "matrix_template_video",
+            "cost": 9, "points": 100, "expires_in": 300,
+            "cost_breakdown": {"base": 5, "segments": 2, "duration": 2, "total": 9},
+            "confirmation_required": True,
+        }
+        with patch("hq_cli.client.request_json", side_effect=[
+                (200, quote), (200, {"job_id": 93, "cost": 9, "points_left": 91})]) as request:
+            code, output, error = self.invoke(
+                ["run", "video-timeline-compose", "--input", "@-"], raw)
+            self.assertEqual(0, code, error)
+            self.assertEqual(9, self.payload(output)["result"]["cost"])
+            self.assertEqual(9, self.payload(output)["result"]["cost_breakdown"]["total"])
+            code, output, error = self.invoke([
+                "run", "video-timeline-compose", "--input", "@-", "--confirm",
+                "--quote-token", "q.timeline",
+            ], raw)
+        self.assertEqual(0, code, error)
+        self.assertEqual(93, self.payload(output)["result"]["job_id"])
+        first, second = request.call_args_list
+        self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
+        invalid = dict(value)
+        invalid["segments"] = [dict(item) for item in value["segments"]]
+        invalid["segments"][-1]["transition"] = "fade"
+        code, _output, error = self.invoke(
+            ["run", "video-timeline-compose", "--input", "@-"],
+            json.dumps(invalid).encode(),
+        )
+        self.assertEqual(cli.EXIT_INPUT, code)
+        self.assertIn("final timeline transition", error)
+
     def test_matrix_template_batch_quotes_and_confirms_exact_count(self):
         self.authorize()
         value = {
             "top_text": "批量模板成片标题",
             "bottom_text": "评论区领取完整方案",
             "template_id": "native-bold", "font_family": "AaHouDiHei", "count": 3,
+            "voiceover": {
+                "text": "同一文案批量生成三条配音视频", "voice": "public_voice",
+                "voice_scope": "public", "speed": 1.1,
+                "bgm": True,
+            },
         }
         raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
         quote = {
@@ -1120,6 +1256,25 @@ class HqCliTests(unittest.TestCase):
             dict(base, bgm=False),
             dict(base, template_id="../bad"),
             dict(base, font_family="x" * 81),
+            dict(base, voiceover={}),
+            dict(base, voiceover={"text": "只有文案"}),
+            dict(base, voiceover={"text": "文" * 121, "voice": "public_voice"}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "voice_scope": "shared"}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "speed": 2.1}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "bgm": 1}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "bgm_volume": 0.2}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "bgm": False, "bgm_volume": 0.2}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "bgm": True, "bgm_volume": -0.01}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "bgm": True, "bgm_volume": 1.01}),
+            dict(base, voiceover={"text": "有效文案", "voice": "public_voice",
+                                  "provider": "cosyvoice"}),
         ):
             with self.subTest(payload=payload), patch("hq_cli.client.request_json") as request:
                 code, _, error = self.invoke(

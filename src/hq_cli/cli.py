@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -33,6 +34,8 @@ EXIT_API = 10
 EXIT_CONFIRMATION = 11
 EXIT_INSTALL = 12
 MAX_INPUT_BYTES = 65536
+QUOTE_TOKEN_ENV = "HQ_CLI_QUOTE_TOKEN"
+_QUOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,4031}\.[A-Fa-f0-9]{64}$")
 REFRESH_EARLY_SECONDS = 5 * 60
 AUTH_LOST_MESSAGE = "授权已失效，请运行 hq login --json"
 LOGIN_SCOPES = [
@@ -81,6 +84,19 @@ def _error(error):
         payload["details"] = error.details
     _write(sys.stderr, payload)
     return error.code
+
+
+def _environment_quote_token():
+    """Read the server-only quote channel without ever echoing its value."""
+    if QUOTE_TOKEN_ENV not in os.environ:
+        return None
+    token = os.environ.get(QUOTE_TOKEN_ENV, "")
+    if not isinstance(token, str) or not _QUOTE_TOKEN_RE.fullmatch(token):
+        raise CliError(
+            EXIT_CONFIRMATION, "invalid_quote_token",
+            "HQ_CLI_QUOTE_TOKEN is invalid",
+        )
+    return token
 
 
 def _reject_non_finite(value):
@@ -269,6 +285,11 @@ def _validate(capability, payload):
         _validate_video_channel(payload)
     if capability.get("id") in {"text-video-generate", "director-scene-talking-generate"}:
         _validate_text_video_talking(payload)
+    if capability.get("id") in {
+            "matrix-template-generate", "matrix-template-batch-generate"}:
+        _validate_matrix_template_voiceover(capability, payload)
+    if capability.get("id") == "video-timeline-compose":
+        _validate_timeline_compose(payload)
     if capability.get("id") in {"director-scene-image-generate", "director-scene-video-generate"}:
         _validate_director_scenes(payload)
     if capability.get("id") == "leads-generate":
@@ -277,6 +298,51 @@ def _validate(capability, payload):
             raise CliError(EXIT_INPUT, "input_error", "douyin or xhs leads require keyword")
         if "channels" in platforms and not payload.get("channels_targets"):
             raise CliError(EXIT_INPUT, "input_error", "channels leads require channels_targets")
+
+
+def _validate_matrix_template_voiceover(capability, payload):
+    voiceover = payload.get("voiceover")
+    if voiceover is None:
+        return
+    definition = capability["input_schema"]["properties"]["voiceover"]
+    _validate({
+        "id": "matrix-template-voiceover",
+        "input_schema": definition,
+    }, voiceover)
+    if "bgm_volume" in voiceover and voiceover.get("bgm") is not True:
+        raise CliError(
+            EXIT_INPUT, "input_error",
+            "voiceover.bgm_volume requires voiceover.bgm=true",
+        )
+
+
+def _validate_timeline_compose(payload):
+    segments = payload.get("segments") or []
+    for index, item in enumerate(segments):
+        if not isinstance(item, dict):
+            raise CliError(EXIT_INPUT, "input_error", "timeline segment must be an object")
+        kind = item.get("type")
+        allowed = {
+            "image": {"type", "asset_id", "asset_index", "duration", "transition"},
+            "video": {"type", "asset_id", "trim_start", "trim_end", "transition"},
+            "text_card": {"type", "text", "style", "duration", "transition"},
+        }.get(kind)
+        if allowed is None or set(item) - allowed:
+            raise CliError(EXIT_INPUT, "input_error", "timeline segment %d is invalid" % index)
+        if kind in {"image", "video"} and (
+                isinstance(item.get("asset_id"), bool)
+                or not isinstance(item.get("asset_id"), int)
+                or item["asset_id"] < 1):
+            raise CliError(EXIT_INPUT, "input_error", "timeline asset_id is invalid")
+        if kind == "text_card" and not isinstance(item.get("text"), str):
+            raise CliError(EXIT_INPUT, "input_error", "timeline text card is invalid")
+        if item.get("transition", "none") not in {"none", "fade"}:
+            raise CliError(EXIT_INPUT, "input_error", "timeline transition must be none or fade")
+    if segments and segments[-1].get("transition", "none") != "none":
+        raise CliError(EXIT_INPUT, "input_error", "final timeline transition must be none")
+    bgm = payload.get("bgm", bool(payload.get("bgm_asset_id")))
+    if not isinstance(bgm, bool) or bgm != bool(payload.get("bgm_asset_id")):
+        raise CliError(EXIT_INPUT, "input_error", "bgm=true requires bgm_asset_id")
 
 
 def _validate_text_video_talking(payload):
@@ -756,16 +822,22 @@ def main(argv=None):
                 if args.expected_cost is not None:
                     raise CliError(EXIT_USAGE, "usage_error", "API capabilities do not accept --expected-cost")
                 paid = capability["side_effect"] == "paid"
+                quote_token = args.quote_token
+                # The environment channel exists only for the in-process video
+                # Agent bridge.  Ignore it for quotes/non-paid actions and when
+                # an interactive caller explicitly supplied the CLI argument.
+                if paid and args.confirm and quote_token is None:
+                    quote_token = _environment_quote_token()
                 if capability["confirmation_required"] and not paid and not args.confirm:
                     raise CliError(EXIT_CONFIRMATION, "confirmation_required", "re-run this action with --confirm")
-                if args.quote_token and not args.confirm:
+                if quote_token and not args.confirm:
                     raise CliError(EXIT_USAGE, "usage_error", "--quote-token requires --confirm")
-                if paid and args.confirm and not args.quote_token:
+                if paid and args.confirm and not quote_token:
                     raise CliError(EXIT_CONFIRMATION, "quote_required", "run without --confirm first, then reuse the same input with the returned quote_token")
                 credentials = _credentials()
                 request_body = {"action": capability["api_action"], "input": payload, "confirm": bool(args.confirm)}
-                if args.quote_token:
-                    request_body["quote_token"] = args.quote_token
+                if quote_token:
+                    request_body["quote_token"] = quote_token
                 result = _request("/api/auth/cli/action", "POST", request_body,
                                   credentials["access_token"],
                                   timeout=310 if capability["id"] == "ip12-message" else 120)
