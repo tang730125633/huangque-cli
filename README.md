@@ -81,6 +81,10 @@ hq describe ip12-projects --json
 
 ## 给 Agent 的安全工作流
 
+口播视频模板接入见 [口播网感模板调用说明](docs/editorial-template.md)：上传现有口播，
+确认剪辑范围后，用 `video-compose-render` 的可选参数选择 `ip-editorial-serif-v1`。
+该能力需要配套后端上线；CLI 更新不等于服务器已经部署。
+
 1. 运行 `hq capabilities --json` 发现能力。
 2. 运行 `hq describe <能力名> --json` 读取输入约束与副作用。
 3. 准备 UTF-8 JSON，先执行只读或报价阶段。
