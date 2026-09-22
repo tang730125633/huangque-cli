@@ -401,8 +401,25 @@ for identifier, name, description in (
     ("text-video-voices", "文案成片音色", "读取文案成片可用音色。"),
     ("matrix-template-capability", "模板成片可用状态", "读取模板成片功能开关和生成服务状态。"),
     ("matrix-template-templates", "模板成片模板", "读取模板成片可用视觉模板。"),
+    ("matrix-template-controls", "模板可调范围", "读取单个模板的可调参数范围、版本号与默认值。"),
 ):
     CAPABILITIES[identifier] = _api(identifier, name, identifier, description, scope="assets:read")
+CAPABILITIES["matrix-template-controls"]["input_schema"]["properties"] = {
+    "template_id": {
+        "type": "string", "minLength": 1, "maxLength": 64,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+        "description": "从 matrix-template-templates 选定的 template_id",
+    },
+}
+CAPABILITIES["matrix-template-controls"]["input_schema"]["required"] = ["template_id"]
+CAPABILITIES["matrix-template-controls"]["constraints"] = [
+    "tunable=false means this template cannot be adjusted; never invent parameters for it",
+    "template_revision, overrides_schema, defaults and slots are owned by the renderer and echoed verbatim",
+    "read this before previewing; without it overrides must not be sent",
+]
+CAPABILITIES["matrix-template-controls"]["next_actions"] = [
+    "tunable=true 时按 overrides_schema 组装参数，用 matrix-template-preview 出对比预览；tunable=false 时明确告诉用户这款模板不可调。",
+]
 CAPABILITIES["pricing"] = _api(
     "pricing", "点数价格", "pricing", "读取主站当前点数价格目录。", scope="profile:read")
 CAPABILITIES["dl"] = _download(
@@ -438,6 +455,17 @@ CAPABILITIES["video-import"] = _upload(
 )
 CAPABILITIES["video-import"]["file_input"].update({
     "maxBytes": 100 * 1024 * 1024, "mimeTypes": ["video/mp4"], "accountActiveMaxFiles": 6,
+})
+CAPABILITIES["video-compose-import"] = _upload(
+    "video-compose-import", "导入口播原片",
+    "把本人指定的 MP4/MOV 口播原片导入视频资产库，返回 source_asset_id 供一键成片使用。",
+    "assets:upload",
+)
+CAPABILITIES["video-compose-import"]["file_input"].update({
+    "maxBytes": 2 * 1024 * 1024 * 1024,
+    "mimeTypes": ["video/mp4", "video/quicktime"],
+    "accountActiveMaxFiles": 6,
+    "accountActiveMaxBytes": 2 * 1024 * 1024 * 1024,
 })
 CAPABILITIES["inspiration-catalog"] = _api(
     "inspiration-catalog", "灵感案例", "inspiration-catalog", "读取主站当前公开的灵感案例。",
@@ -622,33 +650,6 @@ CAPABILITIES["short-drama-completion-confirm"] = _api(
      "acknowledged": {"type": "boolean", "const": True}, "request_id": REQUEST_ID},
     ["project_id", "revision", "final_version_id", "asset_id", "delivery_hash", "acknowledged", "request_id"],
     "short-drama:write", "write", True)
-CAPABILITIES["ip12-projects"] = _api(
-    "ip12-projects", "IP12 项目列表", "ip12-projects", "读取当前账号在主站 Hermes IP12 中的全部诊断项目。", scope="ip12:read")
-CAPABILITIES["ip12-project"] = _api(
-    "ip12-project", "IP12 项目资料", "ip12-project", "读取一个本人 Hermes IP12 项目的基础资料、对话、模块进度与已存报告。",
-    {"project_id": STRING_ID}, ["project_id"], "ip12:read")
-CAPABILITIES["ip12-create"] = _api(
-    "ip12-create", "创建 IP12 项目", "ip12-create", "在当前账号创建一个新的 IP12 项目。",
-    {"title": {"type": "string", "minLength": 1, "maxLength": 120}}, ["title"], "ip12:write", "write", True)
-CAPABILITIES["ip12-delete"] = _api(
-    "ip12-delete", "删除 IP12 项目", "ip12-delete", "删除当前账号的一个 IP12 项目；删除前应先读取并核对目标。",
-    {"project_id": STRING_ID}, ["project_id"], "ip12:write", "delete", True)
-CAPABILITIES["ip12-delete"]["next_actions"] = [
-    "删除不可恢复；先用 ip12-project 读取核对 project_id，再以 --confirm 确认删除。",
-]
-CAPABILITIES["ip12-report"] = _api(
-    "ip12-report", "读取 IP12 报告", "ip12-report", "读取一个本人 Hermes IP12 项目已经保存的模块报告；不会重新生成报告。",
-    {"project_id": STRING_ID}, ["project_id"], "ip12:read")
-CAPABILITIES["ip12-message"] = _api(
-    "ip12-message", "继续 IP12 对话", "ip12-message",
-    "向本人 IP12 项目提交一轮回答并调用 AI 教练；request_id 必须每轮唯一，重试同一轮时保持不变。",
-    {"project_id": STRING_ID, "message": {"type": "string", "minLength": 1, "maxLength": 4000},
-     "request_id": STRING_ID},
-    ["project_id", "message", "request_id"], "ip12:chat", "external_ai", True,
-    {"kind": "external_ai", "points": 0, "detail": "不扣点，但会写入 IP12 项目并调用黄雀 AI。"})
-CAPABILITIES["ip12-message"]["next_actions"] = [
-    "网络超时后只可用完全相同的输入和 request_id 重试；若返回结果未知，先读取 IP12 项目。",
-]
 CAPABILITIES["prompt-optimize"] = _api(
     "prompt-optimize", "优化提示词", "prompt-optimize", "真实调用黄雀主站提示词优化服务。",
     {"prompt": {"type": "string", "minLength": 1, "maxLength": 2000},
@@ -1070,12 +1071,12 @@ AUDIO_FIELDS = {
 COLLECT_MEDIA_URL = {
     "type": "string", "minLength": 8, "maxLength": 2048,
     "pattern": "^(?:https?://(?:[^/?#@]+\\.)?(?:douyin\\.com|iesdouyin\\.com|xiaohongshu\\.com|xhslink\\.com|xhslink\\.cn|bilibili\\.com|b23\\.tv)(?::(?:80|443))?(?:[/?#].*)?|https://weixin\\.qq\\.com(?::443)?/sph/[A-Za-z0-9]+(?:[?#].*)?)$",
-    "description": "抖音、小红书、视频号或 B 站的公开内容链接；视频号须使用 weixin.qq.com/sph/ 分享链接",
+    "description": "抖音、小红书、视频号或 B 站的公开内容链接；视频号须使用 weixin.qq.com/sph/ 分享链接（视频动态采集原视频，图文动态采集全部图片）",
 }
 COLLECT_CONTENT_URL = {
     "type": "string", "minLength": 8, "maxLength": 2048,
     "pattern": "^(?:https?://(?:[^/?#@]+\\.)?(?:douyin\\.com|iesdouyin\\.com|xiaohongshu\\.com|xhslink\\.com|xhslink\\.cn|bilibili\\.com|b23\\.tv|x\\.com|twitter\\.com)(?::(?:80|443))?(?:[/?#].*)?|https://weixin\\.qq\\.com(?::443)?/sph/[A-Za-z0-9]+(?:[?#].*)?)$",
-    "description": "抖音、小红书、视频号、B 站或 X 单帖公开链接；视频号须使用 weixin.qq.com/sph/ 分享链接",
+    "description": "抖音、小红书、视频号、B 站或 X 单帖公开链接；视频号须使用 weixin.qq.com/sph/ 分享链接（支持视频与图文动态，图文一并返回文案与图片）",
 }
 LEADS_FIELDS = {
     "keyword": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -1250,11 +1251,107 @@ MATRIX_TEMPLATE_FIELDS = {
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},
     "font_family": {"type": "string", "maxLength": 80},
     "voiceover": MATRIX_TEMPLATE_VOICEOVER,
+    "user_materials": {
+        "type": "array", "minItems": 1, "maxItems": 20,
+        "items": _schema({
+            "upload_id": {"type": "string", "minLength": 1, "maxLength": 180},
+            "media_type": {"type": "string", "enum": ["image", "video"]},
+            "clip_start_seconds": {"type": "number", "minimum": 0, "maximum": 3600},
+        }, ["upload_id", "media_type"]),
+        "description": "本人素材；先通过 image-upload 或 video-upload 取得 upload_id",
+    },
 }
+MATRIX_TEMPLATE_OVERRIDES_FIELDS = {
+    "title_scale": {
+        "type": "number", "minimum": 0.85, "maximum": 1.10, "default": 1.0,
+        "description": "标题缩放；默认 1.0，范围 0.85-1.10",
+    },
+    "title_offset_y": {
+        "type": "integer", "minimum": -60, "maximum": 60, "default": 0,
+        "description": "标题上下移动像素（1080x1920 设计坐标）；负数上移，默认 0",
+    },
+    "cta_scale": {
+        "type": "number", "minimum": 0.85, "maximum": 1.10, "default": 1.0,
+        "description": "底部行动文案缩放；默认 1.0，范围 0.85-1.10",
+    },
+    "cta_offset_y": {
+        "type": "integer", "minimum": -60, "maximum": 60, "default": 0,
+        "description": "底部行动文案上下移动像素；负数上移，默认 0",
+    },
+    "accent_color": {
+        "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$",
+        "description": "强调色（只改强调层，不改正文与素材），#RRGGBB",
+    },
+    "media_focus": {
+        "type": "array", "minItems": 1, "maxItems": 21,
+        "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["slot", "x", "y"],
+            "properties": {
+                "slot": {"type": "integer", "minimum": 1, "maximum": 21,
+                         "description": "画面槽位，从 1 开始，与素材顺序一致"},
+                "x": {"type": "number", "minimum": 0, "maximum": 1,
+                      "description": "焦点横向位置 0-1"},
+                "y": {"type": "number", "minimum": 0, "maximum": 1,
+                      "description": "焦点纵向位置 0-1"},
+            },
+        },
+        "description": "画面焦点；数组项为 {slot,x,y}，槽位不重复",
+    },
+}
+MATRIX_TEMPLATE_TUNING_FIELDS = {
+    "bgm": {
+        "type": "boolean", "default": True,
+        "description": "是否带背景音乐；正式生成默认 true，带口播时默认 false，预览必须与之一致",
+    },
+    "template_revision": {
+        "type": "string", "pattern": "^[0-9a-f]{64}$",
+        "description": "matrix-template-controls 返回的模板版本号；改参数时必须原样回传",
+    },
+    "overrides": {
+        "type": "object", "additionalProperties": False,
+        "properties": MATRIX_TEMPLATE_OVERRIDES_FIELDS,
+        "description": "参数微调；只有 tunable=true 的模板可用",
+    },
+    "preview_id": {
+        "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+        "description": "matrix-template-preview 结果里的预览标识；带它提交会复用预览冻结的素材/时长/运动",
+    },
+}
+MATRIX_TEMPLATE_PREVIEW_FIELDS = {
+    key: value for key, value in MATRIX_TEMPLATE_FIELDS.items()
+    if key != "voiceover"
+}
+# A preview never references another preview: preview_id stays generate-only.
+MATRIX_TEMPLATE_PREVIEW_FIELDS.update({
+    key: value for key, value in MATRIX_TEMPLATE_TUNING_FIELDS.items()
+    if key != "preview_id"
+})
 MATRIX_TEMPLATE_BATCH_FIELDS = {
     **MATRIX_TEMPLATE_FIELDS,
     "count": {"type": "integer", "minimum": 2, "maximum": 5},
 }
+CAPABILITIES["matrix-template-preview"] = _api(
+    "matrix-template-preview", "模板参数微调预览",
+    "matrix-template-preview",
+    "用与正式生成相同的输入渲染默认版与微调版对比，不扣点、不登记作品。",
+    MATRIX_TEMPLATE_PREVIEW_FIELDS,
+    ["top_text", "bottom_text", "template_id", "template_revision"],
+    "generation:quote", "write", False,
+    {"kind": "none", "detail": "预览不扣点、不算交付；确认后才走正式报价。"},
+)
+CAPABILITIES["matrix-template-preview"]["constraints"] = [
+    "read matrix-template-controls first and copy template_revision verbatim",
+    "only tunable templates can be previewed; other templates must be refused explicitly",
+    "overrides follows the vocabulary: title_scale/cta_scale 0.85-1.10, title_offset_y/cta_offset_y -60..60, accent_color #RRGGBB, media_focus [{slot,x,y}]",
+    "voiceover, duration and batch fields are rejected: a preview only compares picture and typography",
+    "bgm must be the same as the later generate call (generate defaults to true; a voiceover submit defaults to false)",
+    "the preview is not a deliverable: show both versions and their frames to the user, never promise it as the final video",
+]
+CAPABILITIES["matrix-template-preview"]["next_actions"] = [
+    "拿到 job_id 后用 task 轮询；把默认版与微调版的视频/关键帧都给用户看，等他确认后再提交正式生成。",
+    "用户确认后用完全相同的输入 + preview_id 调 matrix-template-generate，报价确认后提交。",
+]
 TIMELINE_VOICEOVER = _schema({
     "text": {"type": "string", "minLength": 1, "maxLength": 120},
     "voice": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -1427,7 +1524,16 @@ CAPABILITIES["matrix-template-generate"]["constraints"] = [
     "with voiceover, final duration always follows narration; without voiceover BGM remains enabled",
     "duration is calculated automatically",
     "the first call only quotes the fixed template-video cost",
+    "ordinary accounts use owner-scoped user_materials first; remaining or all visual slots use public internet materials only",
+    "shared Huangque materials are restricted to authorized staff/test accounts",
+    "overrides/template_revision only work on templates whose matrix-template-controls say tunable=true",
+    "with preview_id the texts, materials, font, bgm and parameters must equal the previewed ones; the preview's frozen materials are reused when user_materials is omitted",
+    "batch generation rejects tuning fields on purpose: use matrix-template-generate for a tuned video",
 ]
+CAPABILITIES["matrix-template-generate"]["input_schema"]["properties"] = {
+    **CAPABILITIES["matrix-template-generate"]["input_schema"]["properties"],
+    **MATRIX_TEMPLATE_TUNING_FIELDS,
+}
 CAPABILITIES["matrix-template-generate"]["next_actions"] = [
     "核对报价后，用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后仅使用 task 轮询。",
 ]
@@ -1439,6 +1545,8 @@ CAPABILITIES["matrix-template-batch-generate"]["constraints"] = [
     "voiceover.bgm defaults to false; when true, bgm_volume defaults to 0.2 and accepts 0-1",
     "with voiceover, final duration always follows narration; without voiceover BGM remains enabled",
     "duration is calculated automatically",
+    "ordinary accounts use owner-scoped user_materials first; remaining or all visual slots use public internet materials only",
+    "shared Huangque materials are restricted to authorized staff/test accounts",
 ]
 CAPABILITIES["matrix-template-batch-generate"]["next_actions"] = [
     "核对总价与 count 后，用完全相同的输入、quote_token 与 --confirm 提交；只轮询返回的 job_ids。",
@@ -1576,6 +1684,8 @@ for identifier, website_modes in {
     "matrix-template-capability": ["matrix_template.single"],
     "matrix-template": ["matrix_template.single"],
     "matrix-template-templates": ["matrix_template.single"],
+    "matrix-template-controls": ["matrix_template.single"],
+    "matrix-template-preview": ["matrix_template.single"],
     "matrix-template-generate": ["matrix_template.single"],
     "matrix-template-batch-generate": ["matrix_template.batch"],
     "video-timeline-compose": ["matrix_template.single"],
@@ -1678,8 +1788,6 @@ _AGENT_RESOURCE_OVERRIDES = {
     "leads-delete": "lead",
 }
 _AGENT_OPERATIONS = {
-    "ip12-projects": "list", "ip12-project": "get", "ip12-report": "get",
-    "ip12-create": "create", "ip12-message": "update", "ip12-delete": "delete",
     "digital-ip-projects": "list", "digital-ip-project": "get", "digital-ip-report": "get",
     "short-drama-projects": "list", "short-drama-project": "get",
     "short-drama-conversation": "get", "short-drama-preflight": "get",

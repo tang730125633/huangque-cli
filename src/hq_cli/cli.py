@@ -40,7 +40,7 @@ _QUOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,4031}\.[A-Fa-f0-9]{64}$")
 REFRESH_EARLY_SECONDS = 5 * 60
 AUTH_LOST_MESSAGE = "授权已失效，请运行 hq login --json"
 LOGIN_SCOPES = [
-    "profile:read", "ip12:read", "ip12:write", "ip12:chat", "prompt:optimize", "canvas:read",
+    "profile:read", "ip12:read", "ip12:write", "prompt:optimize", "canvas:read",
     "canvas:write", "canvas:agent", "canvas:edit", "tasks:read", "assets:read", "assets:write", "assets:upload",
     "generation:quote", "generation:submit",
     "video-compose:read", "video-compose:write", "digital-presenter:read", "digital-presenter:write",
@@ -294,6 +294,9 @@ def _validate(capability, payload):
     if capability.get("id") in {
             "matrix-template-generate", "matrix-template-batch-generate"}:
         _validate_matrix_template_voiceover(capability, payload)
+    if capability.get("id") in {
+            "matrix-template-generate", "matrix-template-preview"}:
+        _validate_matrix_template_tuning(capability, payload)
     if capability.get("id") == "video-timeline-compose":
         _validate_timeline_compose(payload)
     if capability.get("id") in {"director-scene-image-generate", "director-scene-video-generate"}:
@@ -319,6 +322,75 @@ def _validate_matrix_template_voiceover(capability, payload):
         raise CliError(
             EXIT_INPUT, "input_error",
             "voiceover.bgm_volume requires voiceover.bgm=true",
+        )
+
+
+def _validate_matrix_template_tuning(capability, payload):
+    """Contract v1: overrides need a revision, slots are unique, ids are shaped."""
+    overrides = payload.get("overrides")
+    revision = payload.get("template_revision")
+    if overrides is not None:
+        if not isinstance(overrides, dict) or not overrides:
+            raise CliError(
+                EXIT_INPUT, "input_error",
+                "overrides must contain at least one parameter",
+            )
+        definition = capability["input_schema"]["properties"]["overrides"]
+        allowed = set(definition["properties"])
+        unknown = sorted(set(overrides) - allowed)
+        if unknown:
+            raise CliError(
+                EXIT_INPUT, "input_error",
+                "unknown overrides parameter: %s" % unknown[0],
+            )
+        # Reuse the generic validator for the scalar ranges, accent_color format and
+        # media_focus length; object items need the explicit pass below.
+        _validate(
+            {"id": "matrix-template-overrides",
+             "input_schema": dict(definition, required=[])},
+            overrides,
+        )
+        focuses = overrides.get("media_focus")
+        if focuses is not None:
+            slots = [
+                item.get("slot") for item in focuses if isinstance(item, dict)
+            ]
+            if len(slots) != len(focuses) or len(slots) != len(set(slots)):
+                raise CliError(
+                    EXIT_INPUT, "input_error",
+                    "overrides.media_focus slots must be unique",
+                )
+            for index, item in enumerate(focuses):
+                if set(item) != {"slot", "x", "y"}:
+                    raise CliError(
+                        EXIT_INPUT, "input_error",
+                        "overrides.media_focus item %d must contain slot, x and y" % index,
+                    )
+                for axis in ("x", "y"):
+                    value = item[axis]
+                    if (isinstance(value, bool)
+                            or not isinstance(value, (int, float))
+                            or not math.isfinite(value)
+                            or not 0 <= value <= 1):
+                        raise CliError(
+                            EXIT_INPUT, "input_error",
+                            "overrides.media_focus item %d %s must be between 0 and 1"
+                            % (index, axis),
+                        )
+        if not revision:
+            raise CliError(
+                EXIT_INPUT, "input_error",
+                "overrides requires template_revision from matrix-template-controls",
+            )
+    preview_id = payload.get("preview_id")
+    if preview_id is not None and (
+            not isinstance(preview_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", preview_id)):
+        raise CliError(EXIT_INPUT, "input_error", "preview_id has an invalid format")
+    if capability.get("id") == "matrix-template-preview" and not revision:
+        raise CliError(
+            EXIT_INPUT, "input_error",
+            "template_revision is required; read matrix-template-controls first",
         )
 
 
@@ -446,6 +518,8 @@ def _credentials():
         credentials = client.load_credentials()
         if not credentials:
             raise CliError(EXIT_AUTH, "auth_required", "HQ CLI is not authorized; run `hq login --json`")
+        if client.ACCESS_TOKEN_ENV in os.environ:
+            return credentials
         now = int(time.time())
         access_expires_at = int(credentials.get("access_expires_at") or 0)
         refresh_token = credentials.get("refresh_token") or ""
@@ -771,6 +845,8 @@ def main(argv=None):
                         upload_kind, uploader = "profile avatar", client.upload_profile_avatar
                     elif args.id == "video-import":
                         upload_kind, uploader = "H3 video", client.upload_video_import
+                    elif args.id == "video-compose-import":
+                        upload_kind, uploader = "talking-head source", client.upload_video_compose_import
                     else:
                         upload_kind, uploader = "image", client.upload_image
                 if uploader is not None:
@@ -845,8 +921,7 @@ def main(argv=None):
                 if quote_token:
                     request_body["quote_token"] = quote_token
                 result = _request("/api/auth/cli/action", "POST", request_body,
-                                  credentials["access_token"],
-                                  timeout=310 if capability["id"] == "ip12-message" else 120)
+                                  credentials["access_token"], timeout=120)
             next_actions = list(capability["next_actions"])
             if capability["side_effect"] == "paid" and not args.confirm:
                 if capability["id"] == "director-breakdown-upload":
