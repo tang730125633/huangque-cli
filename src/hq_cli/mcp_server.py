@@ -150,16 +150,25 @@ def _capability_schema(capability):
         }
     elif capability["confirmation_required"]:
         if capability["side_effect"] == "paid":
-            properties["confirm"] = {
-                "type": "boolean",
-                "default": False,
-                "description": "Leave false to obtain a quote; set true only after explicit user approval.",
-            }
-            properties["quote_token"] = {
-                "type": "string",
-                "minLength": 1,
-                "description": "Server quote token from an identical unconfirmed call.",
-            }
+            direct = bool((capability.get("cost") or {}).get("kind") == "direct_submit")
+            if direct:
+                # 2026-09-22 直出生成：一次调用直接提交，没有报价环节。
+                properties["confirm"] = {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Optional: the job submits immediately with or without confirm; there is no quote step.",
+                }
+            else:
+                properties["confirm"] = {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Leave false to obtain a quote; set true only after explicit user approval.",
+                }
+                properties["quote_token"] = {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Server quote token from an identical unconfirmed call.",
+                }
         else:
             properties["confirm"] = {"type": "boolean", "const": True}
             required.append("confirm")
@@ -251,6 +260,9 @@ def _capability_command(capability, arguments):
     values = dict(arguments)
     confirm = values.pop("confirm", False)
     quote_token = values.pop("quote_token", None)
+    direct = bool((capability.get("cost") or {}).get("kind") == "direct_submit")
+    if direct and quote_token is not None:
+        raise ValueError("%s is a direct submission and does not accept quote_token" % capability["id"])
     expected_cost = values.pop("expected_cost", None)
     file_path = values.pop("file", None)
     output_file = values.pop("output_file", None)

@@ -192,7 +192,7 @@ class HqCliTests(unittest.TestCase):
             self.assertEqual(0, code, error)
             self.assertTrue(self.payload(output)["schema"].startswith("hq."))
         code, output, _ = self.invoke(["version"])
-        self.assertEqual("0.15.14", self.payload(output)["cli_version"])
+        self.assertEqual(cli.__version__, self.payload(output)["cli_version"])
         self.assertEqual("Huangque main-site CLI", self.payload(output)["product"])
         self.assertEqual("https://huangquechuanmei.com", self.payload(output)["origin"])
 
@@ -387,7 +387,8 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual([4, 8, 12], by_id["video-generate"]["input_schema"]["properties"]["seconds"]["enum"])
         self.assertEqual("server_quote", by_id["digital-ip-text-generate"]["cost"]["kind"])
         self.assertEqual("server_quote", by_id["text-video-generate"]["cost"]["kind"])
-        self.assertEqual("server_quote", by_id["matrix-template-generate"]["cost"]["kind"])
+        self.assertEqual("direct_submit", by_id["matrix-template-generate"]["cost"]["kind"])
+        self.assertFalse(by_id["matrix-template-generate"]["confirmation_required"])
         self.assertEqual("server_quote", by_id["matrix-template-batch-generate"]["cost"]["kind"])
         self.assertEqual("server_quote", by_id["video-timeline-compose"]["cost"]["kind"])
         self.assertEqual(["segments"], by_id["video-timeline-compose"]["input_schema"]["required"])
@@ -1089,7 +1090,7 @@ class HqCliTests(unittest.TestCase):
         self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
         self.assertEqual("q.text-video", second.kwargs["body"]["quote_token"])
 
-    def test_matrix_template_quotes_confirms_and_reuses_exact_input(self):
+    def test_matrix_template_generate_submits_directly_without_quote(self):
         self.authorize()
         item_schema = catalog.CAPABILITIES[
             "matrix-template-generate"
@@ -1111,26 +1112,24 @@ class HqCliTests(unittest.TestCase):
             ],
         }
         raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
-        quote = {
-            "quote_token": "q.matrix", "kind": "matrix_template_video",
-            "cost": 5, "points": 100, "expires_in": 300,
-            "confirmation_required": True,
-        }
         with patch("hq_cli.client.request_json", side_effect=[
-                (200, quote), (200, {"job_id": 92, "cost": 5, "points_left": 95})]) as request:
+                (200, {"job_id": 92, "cost": 5, "points_left": 95})]) as request:
             code, output, error = self.invoke(
                 ["run", "matrix-template-generate", "--input", "@-"], raw)
-            self.assertEqual(0, code, error)
-            self.assertEqual(5, self.payload(output)["result"]["cost"])
-            code, output, error = self.invoke([
-                "run", "matrix-template-generate", "--input", "@-", "--confirm",
-                "--quote-token", "q.matrix",
-            ], raw)
         self.assertEqual(0, code, error)
         self.assertEqual(92, self.payload(output)["result"]["job_id"])
-        first, second = request.call_args_list
-        self.assertEqual(first.kwargs["body"]["input"], second.kwargs["body"]["input"])
-        self.assertEqual("q.matrix", second.kwargs["body"]["quote_token"])
+        body = request.call_args.kwargs["body"]
+        self.assertEqual("matrix-template-generate", body["action"])
+        self.assertNotIn("quote_token", body)
+        self.assertFalse(body["confirm"])
+        self.assertEqual(value, body["input"])
+        # 直出生成不接受 --quote-token（无报价环节）。
+        code, output, error = self.invoke([
+            "run", "matrix-template-generate", "--input", "@-",
+            "--quote-token", "q.matrix",
+        ], raw)
+        self.assertEqual(cli.EXIT_USAGE, code, error)
+        self.assertEqual("usage_error", self.payload(error)["error"])
 
     def test_timeline_compose_quotes_breakdown_and_rejects_bad_final_transition(self):
         self.authorize()

@@ -1350,7 +1350,7 @@ CAPABILITIES["matrix-template-preview"]["constraints"] = [
 ]
 CAPABILITIES["matrix-template-preview"]["next_actions"] = [
     "拿到 job_id 后用 task 轮询；把默认版与微调版的视频/关键帧都给用户看，等他确认后再提交正式生成。",
-    "用户确认后用完全相同的输入 + preview_id 调 matrix-template-generate，报价确认后提交。",
+    "用户确认后用完全相同的输入 + preview_id 调 matrix-template-generate，直接提交（模板成片已无报价环节）。",
 ]
 TIMELINE_VOICEOVER = _schema({
     "text": {"type": "string", "minLength": 1, "maxLength": 120},
@@ -1408,6 +1408,17 @@ for identifier, name, fields, required in (
         fields, required, "generation:quote", "paid", True,
         {"kind": "server_quote", "unit": "points", "confirmation": "quote_token + --confirm"},
     )
+
+# 2026-09-22 老板定调「不要报价，直接生成」：模板成片单条生成无报价环节，
+# 一次调用直接提交扣点出任务（服务器用确定性幂等键防同参数重复出片）。
+CAPABILITIES["matrix-template-generate"]["description"] = (
+    "使用平台素材库直接创建模板成片：一次调用直接提交生成（无报价环节、"
+    "不接受 quote_token）；同参数重试会重放同一条任务。"
+)
+CAPABILITIES["matrix-template-generate"]["cost"] = {
+    "kind": "direct_submit", "unit": "points", "confirmation": "调用即提交（--confirm 可选）",
+}
+CAPABILITIES["matrix-template-generate"]["confirmation_required"] = False
 
 DIRECTOR_SCRIPT_FIELDS = {
     "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
@@ -1523,7 +1534,7 @@ CAPABILITIES["matrix-template-generate"]["constraints"] = [
     "voiceover.bgm defaults to false; when true, bgm_volume defaults to 0.2 and accepts 0-1",
     "with voiceover, final duration always follows narration; without voiceover BGM remains enabled",
     "duration is calculated automatically",
-    "the first call only quotes the fixed template-video cost",
+    "submission is direct (2026-09-22): one call submits and charges the job; there is no quote step and no quote_token",
     "ordinary accounts use owner-scoped user_materials first; remaining or all visual slots use public internet materials only",
     "shared Huangque materials are restricted to authorized staff/test accounts",
     "overrides/template_revision only work on templates whose matrix-template-controls say tunable=true",
@@ -1535,7 +1546,8 @@ CAPABILITIES["matrix-template-generate"]["input_schema"]["properties"] = {
     **MATRIX_TEMPLATE_TUNING_FIELDS,
 }
 CAPABILITIES["matrix-template-generate"]["next_actions"] = [
-    "核对报价后，用完全相同的输入、quote_token 与 --confirm 提交；拿到 job_id 后仅使用 task 轮询。",
+    "一次调用直接提交（无报价环节）；拿到 job_id 后仅使用 task 轮询。",
+    "同参数重试由服务器幂等键重放同一条任务，不会重复扣点出第二条。",
 ]
 CAPABILITIES["matrix-template-batch-generate"]["constraints"] = [
     "template_id and optional font_family must be selected from matrix-template-templates",

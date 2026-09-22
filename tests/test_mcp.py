@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 
-from hq_cli import mcp_server
+from hq_cli import __version__, mcp_server
 from hq_cli.catalog import CAPABILITIES
 
 
@@ -39,7 +39,9 @@ class McpServerTests(unittest.TestCase):
         )
         single = by_name["hq_matrix_template_generate"]["inputSchema"]
         self.assertIn("font_family", single["properties"])
-        self.assertIn("quote_token", single["properties"])
+        # 2026-09-22 直出生成：无报价环节，schema 不再暴露 quote_token/confirm。
+        self.assertNotIn("quote_token", single["properties"])
+        self.assertNotIn("confirm", single["properties"])
         batch = by_name["hq_matrix_template_batch_generate"]["inputSchema"]
         self.assertEqual((2, 5), (
             batch["properties"]["count"]["minimum"],
@@ -241,7 +243,7 @@ class McpServerTests(unittest.TestCase):
         responses = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(mcp_server.PROTOCOL_VERSION, responses[0]["result"]["supportedVersions"][0])
         self.assertEqual(
-            {"name": "huangque", "version": "0.15.14"},
+            {"name": "huangque", "version": __version__},
             responses[1]["result"]["_meta"][mcp_server.SERVER_INFO_META],
         )
         self.assertEqual([(["version"], "")], calls)

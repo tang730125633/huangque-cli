@@ -751,6 +751,7 @@ def main(argv=None):
             is_upload = capability["kind"] == "upload"
             is_download = capability["kind"] == "download"
             is_avatar_photo = args.id == "video-avatar-create"
+            direct = bool((capability.get("cost") or {}).get("kind") == "direct_submit")
             if args.output and not is_download:
                 raise CliError(EXIT_USAGE, "usage_error", "--output is only valid for download capabilities")
             if is_upload:
@@ -908,22 +909,28 @@ def main(argv=None):
                 # The environment channel exists only for the in-process video
                 # Agent bridge.  Ignore it for quotes/non-paid actions and when
                 # an interactive caller explicitly supplied the CLI argument.
-                if paid and args.confirm and quote_token is None:
+                if paid and args.confirm and quote_token is None and not direct:
                     quote_token = _environment_quote_token()
                 if capability["confirmation_required"] and not paid and not args.confirm:
                     raise CliError(EXIT_CONFIRMATION, "confirmation_required", "re-run this action with --confirm")
                 if quote_token and not args.confirm:
                     raise CliError(EXIT_USAGE, "usage_error", "--quote-token requires --confirm")
-                if paid and args.confirm and not quote_token:
+                if direct and quote_token:
+                    # 2026-09-22 直出生成：无报价环节，一次调用直接提交。
+                    raise CliError(EXIT_USAGE, "usage_error",
+                                   "matrix-template-generate is a direct submission and does not accept --quote-token")
+                if paid and args.confirm and not quote_token and not direct:
                     raise CliError(EXIT_CONFIRMATION, "quote_required", "run without --confirm first, then reuse the same input with the returned quote_token")
                 credentials = _credentials()
                 request_body = {"action": capability["api_action"], "input": payload, "confirm": bool(args.confirm)}
                 if quote_token:
                     request_body["quote_token"] = quote_token
+                # 直出提交的内容侧校验会把每条本人素材同步转发到渲染中转
+                # （35-117 秒/条），9 条素材可能要十几分钟：超时必须覆盖整段。
                 result = _request("/api/auth/cli/action", "POST", request_body,
-                                  credentials["access_token"], timeout=120)
+                                  credentials["access_token"], timeout=3600 if direct else 120)
             next_actions = list(capability["next_actions"])
-            if capability["side_effect"] == "paid" and not args.confirm:
+            if capability["side_effect"] == "paid" and not args.confirm and not direct:
                 if capability["id"] == "director-breakdown-upload":
                     next_actions = [
                         "Review cost and points, then re-run the same file with `--confirm --quote-token <quote_token> --expected-cost <cost>`. "
