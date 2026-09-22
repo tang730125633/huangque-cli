@@ -338,7 +338,7 @@ hq skill install pi
 | “用人物照片和衣服图快速做换装视频” | `tryon-fast-generate` | `person_image_upload_id`、`clothes_upload_id` | 两项都先通过 `image-upload` 上传；时长 5–15 秒 |
 | “以人物视频为底片，更换衣服或背景” | `tryon-classic-generate` | `person_video_upload_id` | 衣服图、背景图至少提供一项；人物视频先通过 `video-upload` 上传；时长 1–6 秒 |
 
-先用 `hq run assets --input @assets.json --json` 查本人资产中的 `audio_file`，用 `hq run video-avatars --json` 查本人可用的 `avatar_id`。本地参考视频只接受 MP4、MOV 或 WebM，使用绝对路径、最大 32 MiB，并需显式确认：
+先用 `hq run assets --input @assets.json --json` 查本人资产中的 `audio_file`，用 `hq run video-avatars --json` 查本人可用的 `avatar_id`。本地参考视频只接受 MP4、MOV 或 WebM，使用绝对路径并需显式确认。单个普通图片或视频上传没有 CLI 产品容量上限；服务端按当前账号的短期私有上传总数（最多 20 个）和总容量（最多 2 GiB）验收，不会静默压缩文件：
 
 ```sh
 hq run video-upload --file /absolute/path/reference.mp4 --confirm --json
