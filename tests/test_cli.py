@@ -1247,6 +1247,8 @@ class HqCliTests(unittest.TestCase):
             "template_id": "native-bold",
         }
         for payload in (
+            dict(base, retry_of_job_id=0),
+            dict(base, retry_of_job_id=True),
             dict(base, duration=8),
             dict(base, count=2),
             dict(base, template_id="../bad"),
@@ -1350,6 +1352,18 @@ class HqCliTests(unittest.TestCase):
             "input": {"template_id": "ref-05-changsha-white-red"},
             "confirm": False,
         }, request.call_args.kwargs["body"])
+
+    def test_matrix_template_explicit_retry_forwards_failed_job_reference(self):
+        self.authorize()
+        value = {"top_text": "原标题", "bottom_text": "原行动文案",
+                 "template_id": "ref-05-changsha-white-red", "retry_of_job_id": 9878}
+        with patch("hq_cli.client.request_json", return_value=(200, {"job_id": 9900})) as request:
+            code, output, error = self.invoke(
+                ["run", "matrix-template-generate", "--input", "@-"],
+                json.dumps(value).encode(),
+            )
+        self.assertEqual(0, code, error)
+        self.assertEqual(value, request.call_args.kwargs["body"]["input"])
 
     def test_matrix_template_preview_submits_same_input_once(self):
         self.authorize()
