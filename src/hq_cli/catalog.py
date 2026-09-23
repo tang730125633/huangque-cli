@@ -1544,6 +1544,8 @@ CAPABILITIES["matrix-template-generate"]["constraints"] = [
 CAPABILITIES["matrix-template-generate"]["input_schema"]["properties"] = {
     **CAPABILITIES["matrix-template-generate"]["input_schema"]["properties"],
     **MATRIX_TEMPLATE_TUNING_FIELDS,
+    "retry_of_job_id": {"type": "integer", "minimum": 1,
+                        "description": "Explicitly retry an owned template job that failed and was refunded; repeated retries of the same job stay idempotent."},
 }
 CAPABILITIES["matrix-template-generate"]["next_actions"] = [
     "一次调用直接提交（无报价环节）；拿到 job_id 后仅使用 task 轮询。",
